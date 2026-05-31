@@ -43,7 +43,14 @@ data class CreateSessionRequest(
 @Serializable
 data class PromptRequest(
     val parts: List<PromptPart>,
-    val agent: String? = null
+    val agent: String? = null,
+    val model: ModelRef? = null
+)
+
+@Serializable
+data class ModelRef(
+    val providerID: String,
+    val modelID: String
 )
 
 @Serializable
@@ -101,4 +108,26 @@ data class FileInfo(
     val path: String,
     val type: String,
     val size: Long? = null
+)
+
+/* Provider / Model discovery */
+
+@Serializable
+data class ProviderResponse(
+    val all: List<Provider> = emptyList(),
+)
+
+@Serializable
+data class Provider(
+    val id: String,
+    val name: String = "",
+    val source: String = "",
+    val models: Map<String, ModelInfo> = emptyMap(),
+)
+
+@Serializable
+data class ModelInfo(
+    val id: String = "",
+    val providerID: String = "",
+    val name: String = "",
 )

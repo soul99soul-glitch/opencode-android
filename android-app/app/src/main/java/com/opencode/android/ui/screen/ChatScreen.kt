@@ -99,6 +99,12 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var inputFocused by remember { mutableStateOf(false) }
 
+    // Provider/model picker state
+    var providers by remember { mutableStateOf<List<Provider>>(emptyList()) }
+    var showModelPicker by remember { mutableStateOf(false) }
+    var expandedProviderId by remember { mutableStateOf<String?>(null) }
+    var selectedModel by remember { mutableStateOf<ModelRef?>(null) }
+
     // Detect current agent from messages
     val currentAgent = messages.firstOrNull()?.info?.agent
 
@@ -113,13 +119,24 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
         }
     }
 
-    // Load messages
+    // Load messages + providers + initial model
     LaunchedEffect(sessionId) {
         val config = prefs.config.first()
         val api = OpenCodeApi(config)
         api.getMessages(sessionId)
-            .onSuccess { messages = it.takeLast(50) }
+            .onSuccess { msgs ->
+                messages = msgs.takeLast(50)
+                // Extract initial model from last assistant message
+                msgs.firstOrNull { it.info.role == "assistant" }?.info?.let { info ->
+                    if (info.providerID != null && info.modelID != null) {
+                        selectedModel = ModelRef(info.providerID, info.modelID)
+                    }
+                }
+            }
             .onFailure { errorMsg = it.message }
+        // Fetch configured providers
+        api.fetchConfiguredProviders()
+            .onSuccess { providers = it }
         isLoading = false
         api.close()
     }
@@ -240,15 +257,90 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                         if (displayAgent != null) {
                             Text(displayAgent, style = OcType.monoStrong.copy(fontSize = 11.sp), color = c.accent)
                         }
-                        if (messages.firstOrNull()?.info?.modelID != null) {
+                        if (selectedModel != null || messages.firstOrNull()?.info?.modelID != null) {
                             if (displayAgent != null) Text("·", style = OcType.mono.copy(fontSize = 11.sp), color = c.ink4)
-                            Text(
-                                messages.first()!!.info!!.modelID!!,
-                                style = OcType.mono.copy(fontSize = 11.sp),
-                                color = c.ink3,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Box(
+                                Modifier.pressable {
+                                    if (providers.isNotEmpty()) showModelPicker = !showModelPicker
+                                }
+                            ) {
+                                val modelLabel = selectedModel?.modelID
+                                    ?: messages.firstOrNull()?.info?.modelID
+                                    ?: ""
+                                Text(
+                                    modelLabel,
+                                    style = OcType.mono.copy(fontSize = 11.sp),
+                                    color = if (providers.isNotEmpty()) c.ink2 else c.ink3,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                    // Model picker dropdown
+                    AnimatedVisibility(visible = showModelPicker) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(c.surface2)
+                                .border(1.dp, c.line)
+                                .heightIn(max = 240.dp)
+                                .padding(vertical = 4.dp)
+                        ) {
+                            providers.forEach { provider ->
+                                val isExpanded = expandedProviderId == provider.id
+                                val isProviderSelected = selectedModel?.providerID == provider.id
+                                Column {
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .pressable {
+                                                expandedProviderId = if (isExpanded) null else provider.id
+                                            }
+                                            .background(if (isProviderSelected && !isExpanded) c.bg else c.surface2)
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            provider.name.ifBlank { provider.id },
+                                            style = OcType.mono.copy(fontSize = 12.sp),
+                                            color = if (isProviderSelected) c.accent else c.ink2,
+                                        )
+                                        Spacer(Modifier.weight(1f))
+                                        Text(
+                                            if (isExpanded) "−" else "+",
+                                            style = OcType.mono.copy(fontSize = 12.sp),
+                                            color = c.ink4,
+                                        )
+                                    }
+                                    AnimatedVisibility(visible = isExpanded) {
+                                        Column {
+                                            provider.models.keys.forEach { modelId ->
+                                                val isSelected = selectedModel?.providerID == provider.id && selectedModel?.modelID == modelId
+                                                Box(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .pressable {
+                                                            selectedModel = ModelRef(provider.id, modelId)
+                                                            showModelPicker = false
+                                                            expandedProviderId = null
+                                                        }
+                                                        .background(if (isSelected) c.bg else c.surface2)
+                                                        .padding(horizontal = 24.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text(
+                                                        modelId,
+                                                        style = OcType.mono.copy(fontSize = 11.sp),
+                                                        color = if (isSelected) c.accent else c.ink3,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -437,10 +529,16 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                             scope.launch {
                                 val cfg = prefs.config.first()
                                 val api = OpenCodeApi(cfg)
-                                api.sendPrompt(sessionId, content, agent = selectedAgent)
+                                api.sendPrompt(sessionId, content, agent = selectedAgent, model = selectedModel)
                                     .onSuccess { assistantMsg ->
                                         messages = messages + assistantMsg
                                         isSending = false
+                                        // Update selected model from response
+                                        assistantMsg.info.let { info ->
+                                            if (info.providerID != null && info.modelID != null) {
+                                                selectedModel = ModelRef(info.providerID, info.modelID)
+                                            }
+                                        }
                                     }
                                     .onFailure {
                                         val api2 = OpenCodeApi(cfg)

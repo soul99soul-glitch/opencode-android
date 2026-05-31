@@ -115,10 +115,10 @@ class OpenCodeApi(config: ServerConfig) {
     }
 
     /** Send prompt — API returns the assistant message synchronously in response body */
-    suspend fun sendPrompt(sessionId: String, content: String, agent: String? = null): Result<Message> = runCatching {
+    suspend fun sendPrompt(sessionId: String, content: String, agent: String? = null, model: ModelRef? = null): Result<Message> = runCatching {
         val response = longPollClient.post("$baseUrl/session/$sessionId/message") {
             contentType(ContentType.Application.Json)
-            setBody(PromptRequest(parts = listOf(PromptPart(text = content)), agent = agent))
+            setBody(PromptRequest(parts = listOf(PromptPart(text = content)), agent = agent, model = model))
         }
         if (response.status.value in 200..299) {
             response.body<Message>()
@@ -129,6 +129,16 @@ class OpenCodeApi(config: ServerConfig) {
 
     suspend fun abort(sessionId: String): Result<HttpResponse> = runCatching {
         longPollClient.post("$baseUrl/session/$sessionId/abort")
+    }
+
+    /** Fetch available providers (only configured ones, source=config) */
+    suspend fun fetchConfiguredProviders(): Result<List<Provider>> = runCatching {
+        val response = client.get("$baseUrl/provider")
+        if (response.status.value !in 200..299) {
+            throw Exception("HTTP ${response.status.value}")
+        }
+        val body = response.body<ProviderResponse>()
+        body.all.filter { it.source == "config" }
     }
 
     /**
