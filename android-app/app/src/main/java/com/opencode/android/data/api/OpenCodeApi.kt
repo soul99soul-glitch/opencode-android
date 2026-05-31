@@ -94,6 +94,11 @@ class OpenCodeApi(config: ServerConfig) {
         client.get("$baseUrl/agent")
     }
 
+    /** Fetch available skills for slash-command autocomplete */
+    suspend fun fetchSkills(): Result<List<SkillInfo>> = safeRequest {
+        client.get("$baseUrl/skill")
+    }
+
     suspend fun deleteSession(sessionId: String): Result<HttpResponse> = runCatching {
         client.delete("$baseUrl/session/$sessionId")
     }

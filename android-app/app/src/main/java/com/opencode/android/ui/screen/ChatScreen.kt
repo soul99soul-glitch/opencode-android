@@ -126,6 +126,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
     var allKnownAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
+    var skills by remember { mutableStateOf<List<SkillInfo>>(emptyList()) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var inputFocused by remember { mutableStateOf(false) }
     var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
@@ -249,12 +250,10 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             .onSuccess { allAgents ->
                 availableAgents = allAgents.filter { it.mode == "primary" && !it.hidden }
                 allKnownAgents = allAgents.filter { !it.hidden && it.mode != "primary" }
-                if (selectedAgent == null) {
-                    val default = prefs.defaultAgent.first()
-                    selectedAgent = if (availableAgents.any { it.name == default }) default
-                    else availableAgents.firstOrNull()?.name
-                }
             }
+        // Fetch skills for / command autocomplete
+        api.fetchSkills()
+            .onSuccess { skills = it }
         isLoading = false
         api.close()
     }
@@ -697,15 +696,30 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 }
                             }
                         } else {
-                            // ── / command panel: show available commands ──
-                            val slashCommands = listOf(
+                            // ── / command panel: show real skills + mapped commands ──
+                            val typed = inputText.trimStart().removePrefix("/").trim()
+                            // Mapped agent commands (these route to specific subagents)
+                            val agentCommands = listOf(
                                 "review" to "Code review",
                                 "fix" to "Fix bugs",
                                 "find" to "Search codebase",
                                 "explain" to "Explain code",
                                 "plan" to "Create plan",
                             )
-                            slashCommands.forEach { (cmd, desc) ->
+                            // Real skills from server, filtered by typed text
+                            val filteredSkills = if (typed.isEmpty()) {
+                                skills.take(6)
+                            } else {
+                                skills.filter { it.name.contains(typed, ignoreCase = true) }.take(6)
+                            }
+                            // Show agent commands first, then relevant skills
+                            val agentToShow = if (typed.isEmpty()) agentCommands.take(3)
+                                else agentCommands.filter { it.first.startsWith(typed, ignoreCase = true) }
+
+                            val showDivider = agentToShow.isNotEmpty() && filteredSkills.isNotEmpty()
+
+                            // Agent commands
+                            agentToShow.forEach { (cmd, desc) ->
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
@@ -717,6 +731,36 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 ) {
                                     Text("/$cmd", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
                                     Text(desc, style = OcType.mono.copy(fontSize = 12.sp), color = c.ink2)
+                                }
+                            }
+
+                            // Divider
+                            if (showDivider) {
+                                Spacer(Modifier.height(4.dp))
+                                Text("SKILLS", style = OcType.mono.copy(fontSize = 10.sp), color = c.ink4,
+                                    modifier = Modifier.padding(horizontal = 12.dp))
+                                Spacer(Modifier.height(4.dp))
+                            }
+
+                            // Skill items
+                            if (filteredSkills.isEmpty() && typed.isNotEmpty()) {
+                                Text("No matching skills", style = OcType.mono.copy(fontSize = 12.sp),
+                                    color = c.ink4, modifier = Modifier.padding(horizontal = 12.dp))
+                            } else {
+                                filteredSkills.forEach { skill ->
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .pressable { inputText = "/${skill.name} " }
+                                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        Text("/${skill.name}", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
+                                        Text(skill.description.take(50), style = OcType.mono.copy(fontSize = 11.sp),
+                                            color = c.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                             }
                         }

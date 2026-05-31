@@ -147,3 +147,11 @@ data class AgentInfo(
     val mode: String = "primary",
     val hidden: Boolean = false,
 )
+
+/* Skill discovery */
+
+@Serializable
+data class SkillInfo(
+    val name: String,
+    val description: String = "",
+)
