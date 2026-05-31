@@ -124,12 +124,14 @@ fun MessageBubble(
                             val subagentType = inputObj?.get("subagent_type")?.toString()?.trim('"')
                             val subSid = part.sessionID
 
-                            // Task tool with subagent → clickable capsule
-                            if (toolName == "task" && subagentType != null && subSid != null && onSubagentClick != null) {
+                            // Task tool with subagent → clickable capsule (if we have a subagent session id)
+                            if (toolName == "task" && subagentType != null) {
                                 SubagentCapsule(
                                     agent = subagentType,
                                     status = part.state?.status ?: "",
-                                    onClick = { onSubagentClick(subSid, subagentType) },
+                                    onClick = if (subSid != null && onSubagentClick != null)
+                                        {{ onSubagentClick(subSid, subagentType) }}
+                                    else null,
                                 )
                                 Spacer(Modifier.height(3.dp))
                             } else {
@@ -297,7 +299,7 @@ private fun toShortAgent(agent: String): String = when (agent) {
 }
 
 @Composable
-private fun SubagentCapsule(agent: String, status: String, onClick: () -> Unit) {
+private fun SubagentCapsule(agent: String, status: String, onClick: (() -> Unit)?) {
     val c = LocalOcColors.current
     val short = toShortAgent(agent)
     val isRunning = status == "running" || status == "queued"
@@ -306,7 +308,7 @@ private fun SubagentCapsule(agent: String, status: String, onClick: () -> Unit) 
         Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(if (isRunning) c.accent.copy(alpha = 0.12f) else c.surface2)
-            .pressable { onClick() }
+            .then(if (onClick != null) Modifier.pressable { onClick() } else Modifier)
             .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
