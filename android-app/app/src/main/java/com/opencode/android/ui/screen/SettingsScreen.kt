@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
@@ -18,9 +19,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.opencode.android.data.api.OpenCodeApi
+import com.opencode.android.data.model.ModelRef
+import com.opencode.android.data.model.Provider
 import com.opencode.android.data.repository.AppearanceRepository
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.ui.component.Hairline
@@ -54,6 +60,23 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     val darkTheme by appearance.darkTheme.collectAsState(initial = false)
     val accentIndex by appearance.accentIndex.collectAsState(initial = 0)
     val scope = rememberCoroutineScope()
+
+    // Agent / model state
+    val defaultAgent by prefs.defaultAgent.collectAsState(initial = "build")
+    val defaultModelProvider by prefs.defaultModelProvider.collectAsState(initial = "")
+    val defaultModelId by prefs.defaultModelId.collectAsState(initial = "")
+    var providers by remember { mutableStateOf<List<Provider>>(emptyList()) }
+    var showModelPicker by remember { mutableStateOf(false) }
+    var expandedProviderId by remember { mutableStateOf<String?>(null) }
+
+    // Load providers from API
+    LaunchedEffect(Unit) {
+        val cfg = prefs.config.first()
+        val api = OpenCodeApi(cfg)
+        api.fetchConfiguredProviders()
+            .onSuccess { providers = it }
+        api.close()
+    }
 
     Column(
         Modifier
@@ -137,17 +160,31 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                                 .size(38.dp)
                                 .clip(RoundedCornerShape(11.dp))
                                 .background(accent.color)
-                                .then(
-                                    if (selected) Modifier.border(2.dp, c.ink, RoundedCornerShape(11.dp))
-                                    else Modifier
-                                )
                                 .pressable {
                                     scope.launch { appearance.setAccentIndex(index) }
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
                             if (selected) {
-                                Text("✓", style = OcType.monoStrong.copy(fontSize = 14.sp), color = c.accentInk)
+                                androidx.compose.foundation.Canvas(
+                                    Modifier.size(18.dp)
+                                ) {
+                                    val stroke = 2.5.dp.toPx()
+                                    val path = androidx.compose.ui.graphics.Path().apply {
+                                        moveTo(size.width * 0.2f, size.height * 0.5f)
+                                        lineTo(size.width * 0.42f, size.height * 0.72f)
+                                        lineTo(size.width * 0.8f, size.height * 0.28f)
+                                    }
+                                    drawPath(
+                                        path,
+                                        color = c.accentInk,
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                            width = stroke,
+                                            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                            join = androidx.compose.ui.graphics.StrokeJoin.Round,
+                                        ),
+                                    )
+                                }
                             }
                         }
                     }
@@ -160,9 +197,121 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         // ── AGENT ──
         SectionHeader("AGENT")
         SettingsCard {
-            SettingsRow("Default Agent", "code")
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .pressable {
+                        val next = when (defaultAgent) {
+                            "build" -> "plan"
+                            "plan" -> "orchestrator"
+                            else -> "build"
+                        }
+                        scope.launch { prefs.saveDefaultAgent(next) }
+                    }
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Default Agent", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+                Text(
+                    when (defaultAgent) {
+                        "plan" -> "Plan"
+                        "orchestrator" -> "Orch"
+                        else -> "Build"
+                    },
+                    style = OcType.mono,
+                    color = c.ink2,
+                )
+            }
             Hairline()
-            SettingsRow("Model", "claude-sonnet-4-20250514")
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .pressable {
+                        if (providers.isNotEmpty()) showModelPicker = !showModelPicker
+                    }
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Model", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+                val modelLabel = if (defaultModelProvider.isNotBlank() && defaultModelId.isNotBlank()) {
+                    "$defaultModelProvider/$defaultModelId"
+                } else {
+                    if (providers.isEmpty()) "Loading…" else "Select…"
+                }
+                Text(
+                    modelLabel,
+                    style = OcType.mono,
+                    color = if (providers.isNotEmpty()) c.ink2 else c.ink3,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        // Model picker panel — outside the card
+        AnimatedVisibility(visible = showModelPicker) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp)
+                    .background(c.surface2, RoundedCornerShape(14.dp))
+                    .heightIn(max = 280.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 4.dp)
+            ) {
+                providers.forEach { provider ->
+                    val isExpanded = expandedProviderId == provider.id
+                    val isProviderSelected = defaultModelProvider == provider.id
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .pressable {
+                                expandedProviderId = if (isExpanded) null else provider.id
+                            }
+                            .background(if (isProviderSelected && !isExpanded) c.bg else Color.Transparent)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            provider.name.ifBlank { provider.id },
+                            style = OcType.mono.copy(fontSize = 12.sp),
+                            color = if (isProviderSelected) c.accent else c.ink2,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            if (isExpanded) "−" else "+",
+                            style = OcType.mono.copy(fontSize = 12.sp),
+                            color = c.ink4,
+                        )
+                    }
+                    AnimatedVisibility(visible = isExpanded) {
+                        Column {
+                            provider.models.keys.forEach { modelId ->
+                                val isSelected = defaultModelProvider == provider.id && defaultModelId == modelId
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .pressable {
+                                            scope.launch { prefs.saveDefaultModel(provider.id, modelId) }
+                                            showModelPicker = false
+                                            expandedProviderId = null
+                                        }
+                                        .background(if (isSelected) c.bg else Color.Transparent)
+                                        .padding(horizontal = 24.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        modelId,
+                                        style = OcType.mono.copy(fontSize = 11.sp),
+                                        color = if (isSelected) c.accent else c.ink3,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Spacer(Modifier.height(22.dp))
@@ -170,18 +319,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         // ── ABOUT ──
         SectionHeader("ABOUT")
         SettingsCard {
-            SettingsRow("Version", "1.14.20")
-            Hairline()
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .pressable { /* no-op */ }
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Check for updates", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
-                Text("→", style = OcType.mono, color = c.ink4)
-            }
+            SettingsRow("Version", "0.6.0")
         }
 
         Spacer(Modifier.height(28.dp))

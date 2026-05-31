@@ -6,11 +6,20 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.AnimatedVisibility
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Base64
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -28,6 +38,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,7 +48,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -49,6 +60,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -65,6 +77,14 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+
+/** Local UI model for attached files/images */
+private data class AttachmentItem(
+    val mime: String,
+    val dataUri: String,
+    val filename: String,
+    val preview: Any? = null,
+)
 
 /** Short display names for agent modes */
 private fun shortAgent(agent: String?): String = when (agent) {
@@ -98,6 +118,35 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
     var selectedAgent by remember { mutableStateOf("build") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var inputFocused by remember { mutableStateOf(false) }
+    var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
+    var showAttachMenu by remember { mutableStateOf(false) }
+
+    // Helper to process picked URIs
+    fun processUris(uris: List<Uri>) {
+        uris.forEach { uri ->
+            try {
+                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@forEach
+                val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val dataUri = "data:$mimeType;base64,$base64"
+                val filename = uri.lastPathSegment?.substringAfterLast("/") ?: "file"
+                val preview = if (mimeType.startsWith("image/")) {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } else null
+                attachments = attachments + AttachmentItem(mime = mimeType, dataUri = dataUri, filename = filename, preview = preview)
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Image picker
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris -> processUris(uris); showAttachMenu = false }
+
+    // File picker
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris -> processUris(uris); showAttachMenu = false }
 
     // Provider/model picker state
     var providers by remember { mutableStateOf<List<Provider>>(emptyList()) }
@@ -247,18 +296,11 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    // Agent + model info — only show top-level agents (not subagents)
-                    val displayAgent = currentAgent?.let {
-                        if (it == "code" || it == "plan" || it == "orchestrator") shortAgent(it) else null
-                    }
+                    // Model info
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        if (displayAgent != null) {
-                            Text(displayAgent, style = OcType.monoStrong.copy(fontSize = 11.sp), color = c.accent)
-                        }
                         if (selectedModel != null || messages.firstOrNull()?.info?.modelID != null) {
-                            if (displayAgent != null) Text("·", style = OcType.mono.copy(fontSize = 11.sp), color = c.ink4)
                             Box(
                                 Modifier.pressable {
                                     if (providers.isNotEmpty()) showModelPicker = !showModelPicker
@@ -274,72 +316,6 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                            }
-                        }
-                    }
-                    // Model picker dropdown
-                    AnimatedVisibility(visible = showModelPicker) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(c.surface2)
-                                .border(1.dp, c.line)
-                                .heightIn(max = 240.dp)
-                                .padding(vertical = 4.dp)
-                        ) {
-                            providers.forEach { provider ->
-                                val isExpanded = expandedProviderId == provider.id
-                                val isProviderSelected = selectedModel?.providerID == provider.id
-                                Column {
-                                    Row(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .pressable {
-                                                expandedProviderId = if (isExpanded) null else provider.id
-                                            }
-                                            .background(if (isProviderSelected && !isExpanded) c.bg else c.surface2)
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            provider.name.ifBlank { provider.id },
-                                            style = OcType.mono.copy(fontSize = 12.sp),
-                                            color = if (isProviderSelected) c.accent else c.ink2,
-                                        )
-                                        Spacer(Modifier.weight(1f))
-                                        Text(
-                                            if (isExpanded) "−" else "+",
-                                            style = OcType.mono.copy(fontSize = 12.sp),
-                                            color = c.ink4,
-                                        )
-                                    }
-                                    AnimatedVisibility(visible = isExpanded) {
-                                        Column {
-                                            provider.models.keys.forEach { modelId ->
-                                                val isSelected = selectedModel?.providerID == provider.id && selectedModel?.modelID == modelId
-                                                Box(
-                                                    Modifier
-                                                        .fillMaxWidth()
-                                                        .pressable {
-                                                            selectedModel = ModelRef(provider.id, modelId)
-                                                            showModelPicker = false
-                                                            expandedProviderId = null
-                                                        }
-                                                        .background(if (isSelected) c.bg else c.surface2)
-                                                        .padding(horizontal = 24.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text(
-                                                        modelId,
-                                                        style = OcType.mono.copy(fontSize = 11.sp),
-                                                        color = if (isSelected) c.accent else c.ink3,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -395,6 +371,72 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                         contentAlignment = Alignment.Center,
                     ) {
                         Text("■", style = OcType.monoStrong.copy(fontSize = 14.sp), color = c.signal)
+                    }
+                }
+            }
+
+            // Model picker — outside the top bar Row, between Row and Hairline
+            AnimatedVisibility(visible = showModelPicker) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(c.surface2)
+                        .border(1.dp, c.line)
+                        .heightIn(max = 280.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 4.dp)
+                ) {
+                    providers.forEach { provider ->
+                        val isExpanded = expandedProviderId == provider.id
+                        val isProviderSelected = selectedModel?.providerID == provider.id
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .pressable {
+                                    expandedProviderId = if (isExpanded) null else provider.id
+                                }
+                                .background(if (isProviderSelected && !isExpanded) c.bg else c.surface2)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                provider.name.ifBlank { provider.id },
+                                style = OcType.mono.copy(fontSize = 12.sp),
+                                color = if (isProviderSelected) c.accent else c.ink2,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                if (isExpanded) "−" else "+",
+                                style = OcType.mono.copy(fontSize = 12.sp),
+                                color = c.ink4,
+                            )
+                        }
+                        AnimatedVisibility(visible = isExpanded) {
+                            Column {
+                                provider.models.keys.forEach { modelId ->
+                                    val isSelected = selectedModel?.providerID == provider.id && selectedModel?.modelID == modelId
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .pressable {
+                                                selectedModel = ModelRef(provider.id, modelId)
+                                                showModelPicker = false
+                                                expandedProviderId = null
+                                            }
+                                            .background(if (isSelected) c.bg else c.surface2)
+                                            .padding(horizontal = 24.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            modelId,
+                                            style = OcType.mono.copy(fontSize = 11.sp),
+                                            color = if (isSelected) c.accent else c.ink3,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -469,90 +511,228 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                 }
             }
 
-            // ── Bottom input bar ──
-            Row(
+            // ── Bottom input area ──
+            Column(
                 Modifier
                     .fillMaxWidth()
                     .background(c.surface)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .navigationBarsPadding(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .navigationBarsPadding()
             ) {
-                // Input field container
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .heightIn(min = 44.dp, max = 96.dp)
-                        .background(c.surface2, RoundedCornerShape(26.dp))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                ) {
-                    BasicTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        modifier = Modifier
+                // Attachment preview row
+                AnimatedVisibility(visible = attachments.isNotEmpty()) {
+                    Row(
+                        Modifier
                             .fillMaxWidth()
-                            .onFocusChanged { inputFocused = it.isFocused },
-                        textStyle = OcType.body.copy(color = c.ink),
-                        maxLines = 4,
-                        enabled = !isSending,
-                        cursorBrush = SolidColor(c.accent),
-                        decorationBox = { inner ->
-                            if (inputText.isEmpty()) {
-                                Text("Ask opencode…", style = OcType.body, color = c.ink4)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        attachments.forEachIndexed { index, item ->
+                            Box(
+                                Modifier
+                                    .height(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(c.surface2)
+                                    .border(1.dp, c.line, RoundedCornerShape(8.dp)),
+                            ) {
+                                if (item.mime.startsWith("image/") && item.preview is android.graphics.Bitmap) {
+                                    Image(
+                                        bitmap = item.preview.asImageBitmap(),
+                                        contentDescription = item.filename,
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    )
+                                } else {
+                                    Box(
+                                        Modifier
+                                            .height(48.dp)
+                                            .padding(horizontal = 10.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            item.filename.take(12),
+                                            style = OcType.mono.copy(fontSize = 10.sp),
+                                            color = c.ink2,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                                // X button
+                                Box(
+                                    Modifier
+                                        .size(18.dp)
+                                        .align(Alignment.TopEnd)
+                                        .pressable {
+                                            attachments = attachments.filterIndexed { i, _ -> i != index }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text("×", style = OcType.monoStrong.copy(fontSize = 12.sp), color = c.ink4)
+                                }
                             }
-                            inner()
-                        },
-                    )
+                        }
+                    }
                 }
-                // Send button
-                Box(
+
+                // Input bar: [+ expandable] [text field...] [send]
+                Row(
                     Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (inputText.isNotBlank() && !isSending) c.signal else c.surface2
-                        )
-                        .pressable(
-                            enabled = inputText.isNotBlank() && !isSending,
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    // + button group: expands to show image/file options
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        // Image button (slides in from left)
+                        AnimatedVisibility(
+                            visible = showAttachMenu,
+                            enter = fadeIn(tween(150)) + slideInHorizontally(initialOffsetX = { -it / 2 }),
+                            exit = fadeOut(tween(100)) + slideOutHorizontally(targetOffsetX = { -it / 2 }),
                         ) {
-                            if (inputText.isBlank() || isSending) return@pressable
-                            val content = inputText
-                            inputText = ""
-                            isSending = true
-                            streamingText = ""
-                            val userMsg = Message(
-                                info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user"),
-                                parts = listOf(MessagePart(type = "text", text = content))
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(c.surface2)
+                                    .pressable(enabled = !isSending) {
+                                        imagePicker.launch("image/*")
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("🖼", style = OcType.body.copy(fontSize = 16.sp), color = c.ink3)
+                            }
+                        }
+                        // File button (slides in from left)
+                        AnimatedVisibility(
+                            visible = showAttachMenu,
+                            enter = fadeIn(tween(150)) + slideInHorizontally(initialOffsetX = { -it / 2 }),
+                            exit = fadeOut(tween(100)) + slideOutHorizontally(targetOffsetX = { -it / 2 }),
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(c.surface2)
+                                    .pressable(enabled = !isSending) {
+                                        filePicker.launch("*/*")
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("📎", style = OcType.body.copy(fontSize = 16.sp), color = c.ink3)
+                            }
+                        }
+                        // + toggle button
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(c.surface2)
+                                .pressable(enabled = !isSending) {
+                                    showAttachMenu = !showAttachMenu
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            AnimatedContent(
+                                targetState = showAttachMenu,
+                                transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(100)) },
+                                label = "plusToggle",
+                            ) { expanded ->
+                                Text(
+                                    if (expanded) "×" else "+",
+                                    style = OcType.title,
+                                    color = c.ink4,
+                                )
+                            }
+                        }
+                    }
+                    // Input field container
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .heightIn(min = 44.dp, max = 96.dp)
+                            .background(c.surface2, RoundedCornerShape(26.dp))
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        BasicTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { inputFocused = it.isFocused },
+                            textStyle = OcType.body.copy(color = c.ink),
+                            maxLines = 4,
+                            enabled = !isSending,
+                            cursorBrush = SolidColor(c.accent),
+                            decorationBox = { inner ->
+                                if (inputText.isEmpty()) {
+                                    Text("Ask opencode…", style = OcType.body, color = c.ink4)
+                                }
+                                inner()
+                            },
+                        )
+                    }
+                    // Send button
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (inputText.isNotBlank() && !isSending) c.signal else c.surface2
                             )
-                            messages = messages + userMsg
-                            scope.launch {
-                                val cfg = prefs.config.first()
-                                val api = OpenCodeApi(cfg)
-                                api.sendPrompt(sessionId, content, agent = selectedAgent, model = selectedModel)
-                                    .onSuccess { assistantMsg ->
-                                        messages = messages + assistantMsg
-                                        isSending = false
-                                        // Update selected model from response
-                                        assistantMsg.info.let { info ->
-                                            if (info.providerID != null && info.modelID != null) {
-                                                selectedModel = ModelRef(info.providerID, info.modelID)
+                            .pressable(
+                                enabled = inputText.isNotBlank() && !isSending,
+                            ) {
+                                if (inputText.isBlank() || isSending) return@pressable
+                                val content = inputText
+                                inputText = ""
+                                isSending = true
+                                streamingText = ""
+                                // Build parts: text + attachments
+                                val parts = mutableListOf<PromptPart>()
+                                parts.add(PromptPart(type = "text", text = content))
+                                attachments.forEach { att ->
+                                    parts.add(PromptPart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
+                                }
+                                attachments = emptyList()
+                                val userMsg = Message(
+                                    info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user"),
+                                    parts = listOf(MessagePart(type = "text", text = content))
+                                )
+                                messages = messages + userMsg
+                                scope.launch {
+                                    val cfg = prefs.config.first()
+                                    val api = OpenCodeApi(cfg)
+                                    api.sendPrompt(sessionId, parts, agent = selectedAgent, model = selectedModel)
+                                        .onSuccess { assistantMsg ->
+                                            messages = messages + assistantMsg
+                                            isSending = false
+                                            // Update selected model from response
+                                            assistantMsg.info.let { info ->
+                                                if (info.providerID != null && info.modelID != null) {
+                                                    selectedModel = ModelRef(info.providerID, info.modelID)
+                                                }
                                             }
                                         }
-                                    }
-                                    .onFailure {
-                                        val api2 = OpenCodeApi(cfg)
-                                        api2.getMessages(sessionId).onSuccess { messages = it }
-                                        api2.close()
-                                        errorMsg = it.message
-                                        isSending = false
-                                    }
-                                api.close()
-                            }
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("↑", style = OcType.body.copy(color = if (inputText.isNotBlank() && !isSending) c.accentInk else c.ink4))
+                                        .onFailure {
+                                            val api2 = OpenCodeApi(cfg)
+                                            api2.getMessages(sessionId).onSuccess { messages = it }
+                                            api2.close()
+                                            errorMsg = it.message
+                                            isSending = false
+                                        }
+                                    api.close()
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("↑", style = OcType.body.copy(color = if (inputText.isNotBlank() && !isSending) c.accentInk else c.ink4))
+                    }
                 }
             }
         }

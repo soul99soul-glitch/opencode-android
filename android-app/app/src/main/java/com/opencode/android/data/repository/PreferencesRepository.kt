@@ -20,6 +20,9 @@ class PreferencesRepository(context: Context) {
         val PASSWORD = stringPreferencesKey("password")
         val DIRECTORY = stringPreferencesKey("directory")
         val IS_SETUP_DONE = booleanPreferencesKey("is_setup_done")
+        val DEFAULT_AGENT = stringPreferencesKey("default_agent")
+        val DEFAULT_MODEL_PROVIDER = stringPreferencesKey("default_model_provider")
+        val DEFAULT_MODEL_ID = stringPreferencesKey("default_model_id")
     }
 
     val config: Flow<ServerConfig> = appContext.dataStore.data.map { prefs ->
@@ -46,5 +49,28 @@ class PreferencesRepository(context: Context) {
 
     suspend fun setSetupDone(done: Boolean) {
         appContext.dataStore.edit { it[Keys.IS_SETUP_DONE] = done }
+    }
+
+    val defaultAgent: Flow<String> = appContext.dataStore.data.map { prefs ->
+        prefs[Keys.DEFAULT_AGENT] ?: "build"
+    }
+
+    val defaultModelProvider: Flow<String> = appContext.dataStore.data.map { prefs ->
+        prefs[Keys.DEFAULT_MODEL_PROVIDER] ?: ""
+    }
+
+    val defaultModelId: Flow<String> = appContext.dataStore.data.map { prefs ->
+        prefs[Keys.DEFAULT_MODEL_ID] ?: ""
+    }
+
+    suspend fun saveDefaultAgent(agent: String) {
+        appContext.dataStore.edit { it[Keys.DEFAULT_AGENT] = agent }
+    }
+
+    suspend fun saveDefaultModel(provider: String, modelId: String) {
+        appContext.dataStore.edit {
+            it[Keys.DEFAULT_MODEL_PROVIDER] = provider
+            it[Keys.DEFAULT_MODEL_ID] = modelId
+        }
     }
 }

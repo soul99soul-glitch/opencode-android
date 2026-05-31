@@ -87,9 +87,9 @@ fun OnlineDot(active: Boolean = true, modifier: Modifier = Modifier) {
                 .size(13.dp)
                 .graphicsLayer { scaleX = scale; scaleY = scale; alpha = ringAlpha }
                 .clip(CircleShape)
-                .background(c.signal),
+                .background(c.accent),
         )
         // 实心点
-        Box(Modifier.size(7.dp).clip(CircleShape).background(c.signal))
+        Box(Modifier.size(7.dp).clip(CircleShape).background(c.accent))
     }
 }

@@ -122,7 +122,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                 Text(hostPort, style = OcType.mono, color = c.ink2)
                 Spacer(Modifier.width(10.dp))
                 if (error == null && !isLoading) {
-                    Text("online", style = OcType.mono, color = c.signal)
+                    Text("online", style = OcType.mono, color = c.accent)
                 }
                 Spacer(Modifier.weight(1f))
                 Text("${sessions.size} sessions", style = OcType.mono, color = c.ink3)
@@ -332,7 +332,7 @@ private fun SessionRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (active) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(c.signal))
+                Box(Modifier.size(7.dp).clip(CircleShape).background(c.accent))
                 Spacer(Modifier.width(2.dp))
             }
             Text("$messageCount msgs", style = OcType.mono.copy(fontSize = 11.5.sp), color = c.ink3)
