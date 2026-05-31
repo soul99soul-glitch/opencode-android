@@ -106,7 +106,7 @@ fun ToolCallRow(
     var expanded by remember { mutableStateOf(false) }
     val hasDetail = status == "done" && (!output.isNullOrBlank() || !input.isNullOrBlank())
     val dotColor = when (status) {
-        "done" -> c.signal
+        "done" -> c.accent
         "run" -> c.accent
         else -> c.ink4
     }
@@ -144,7 +144,7 @@ fun ToolCallRow(
                         lineTo(size.width * 0.42f, size.height * 0.74f)
                         lineTo(size.width * 0.82f, size.height * 0.28f)
                     }
-                    drawPath(p, c.signal, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.7.dp.toPx()))
+                    drawPath(p, c.accent, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.7.dp.toPx()))
                 }
             }
             if (hasDetail) {
