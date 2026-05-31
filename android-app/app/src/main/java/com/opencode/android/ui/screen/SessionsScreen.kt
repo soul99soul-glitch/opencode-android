@@ -78,7 +78,8 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
         scope.launch {
             isLoading = true
             val cfg = prefs.config.first()
-            hostPort = "${cfg.host}:${cfg.port}"
+            hostPort = if (cfg.host.startsWith("http://") || cfg.host.startsWith("https://"))
+                cfg.host.trimEnd('/') else "${cfg.host}:${cfg.port}"
             val api = OpenCodeApi(cfg)
             api.listSessions()
                 .onSuccess { list ->

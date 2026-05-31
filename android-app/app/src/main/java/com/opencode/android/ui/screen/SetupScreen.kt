@@ -71,15 +71,24 @@ fun SetupScreen(onComplete: () -> Unit) {
         }
 
         // ── Fields ──
+        val isFullUrl = host.startsWith("http://") || host.startsWith("https://")
         Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            UnderlineField(host, { host = it }, "> HOST", leading = { GlyphServer() })
-            UnderlineField(port, { port = it }, "> PORT", leading = { GlyphPorts() }, keyboardType = KeyboardType.Number)
+            UnderlineField(host, { host = it }, "> SERVER URL", leading = { GlyphServer() })
+            if (!isFullUrl) {
+                UnderlineField(port, { port = it }, "> PORT", leading = { GlyphPorts() }, keyboardType = KeyboardType.Number)
+            }
             UnderlineField(password, { password = it }, "> PASSWORD", leading = { GlyphLock() }, placeholder = "Optional", password = true)
             UnderlineField(directory, { directory = it }, "> DIRECTORY", leading = { GlyphFolder() }, placeholder = "~/projects/opencode")
         }
 
         // ── Endpoint preview ──
         Spacer(Modifier.height(22.dp))
+        if (isFullUrl) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Text("→ ", style = OcType.mono, color = c.ink4)
+                Text(host.trimEnd('/'), style = OcType.mono, color = c.accent)
+            }
+        } else {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
@@ -88,6 +97,7 @@ fun SetupScreen(onComplete: () -> Unit) {
             Text(host.ifEmpty { "host" }, style = OcType.mono, color = c.ink2)
             Text(":", style = OcType.mono, color = c.ink4)
             Text(port.ifEmpty { "port" }, style = OcType.mono, color = c.accent)
+        }
         }
 
         // ── Error ──

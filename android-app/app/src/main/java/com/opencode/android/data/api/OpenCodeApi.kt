@@ -28,7 +28,12 @@ class OpenCodeApi(config: ServerConfig) {
         encodeDefaults = true
     }
 
-    private val baseUrl = "http://${config.host}:${config.port}"
+    private val baseUrl = when {
+        config.host.startsWith("http://") || config.host.startsWith("https://") ->
+            config.host.trimEnd('/')  // Full URL — use as-is
+        else ->
+            "http://${config.host}:${config.port}"  // Legacy host:port — auto HTTP
+    }
 
     private val authHeader = if (config.password.isNotBlank()) {
         val cred = Base64.getEncoder().encodeToString("opencode:${config.password}".toByteArray())

@@ -109,10 +109,12 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         // ── CONNECTION ──
         SectionHeader("CONNECTION")
         SettingsCard {
-            SettingsRow("Host", config.host)
+            SettingsRow("Server URL", config.host)
             Hairline()
-            SettingsRow("Port", config.port.toString())
-            Hairline()
+            if (!config.host.startsWith("http://") && !config.host.startsWith("https://")) {
+                SettingsRow("Port", config.port.toString())
+                Hairline()
+            }
             SettingsRow("Password", if (config.password.isBlank()) "—" else "••••••••")
             Hairline()
             SettingsRow("Directory", config.directory.ifBlank { "—" })
@@ -345,7 +347,13 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         ) {
             Text("opencode", style = OcType.mono, color = c.ink4)
             Text(" · ", style = OcType.mono, color = c.ink4)
-            Text("${config.host}:${config.port}", style = OcType.mono, color = c.ink4)
+            val url = when {
+                config.host.startsWith("http://") || config.host.startsWith("https://") ->
+                    config.host.trimEnd('/')
+                else ->
+                    "${config.host}:${config.port}"
+            }
+            Text(url, style = OcType.mono, color = c.ink4)
         }
     }
 }
