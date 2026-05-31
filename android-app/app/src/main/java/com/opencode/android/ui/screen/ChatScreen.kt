@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -129,6 +130,45 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
     var showAttachMenu by remember { mutableStateOf(false) }
     var subtaskWorkerSid by remember { mutableStateOf<String?>(null) }
+
+    // Parse @agent or /command prefix from input
+    val parsedInput = remember(inputText) {
+        val trimmed = inputText.trimStart()
+        when {
+            // @agentname at start: "@oracle review this" → agent=oracle, text="review this"
+            trimmed.startsWith("@") -> {
+                val spaceIdx = trimmed.indexOf(' ')
+                if (spaceIdx > 1) {
+                    val agentPart = trimmed.substring(1, spaceIdx)
+                    val rest = trimmed.substring(spaceIdx + 1).trimStart()
+                    Triple(agentPart, rest, true) // isAgent=true
+                } else if (spaceIdx == -1 && trimmed.length > 1) {
+                    // Just typing @agent — no space yet
+                    Triple(trimmed.substring(1), "", true)
+                } else null
+            }
+            // /command at start: "/review this" → agent=oracle, text="this"
+            trimmed.startsWith("/") -> {
+                val spaceIdx = trimmed.indexOf(' ')
+                val cmd = if (spaceIdx > 0) trimmed.substring(1, spaceIdx)
+                    else trimmed.substring(1)
+                val rest = if (spaceIdx > 0) trimmed.substring(spaceIdx + 1).trimStart() else ""
+                Triple(cmd, rest, false) // isAgent=false, is slash command
+            }
+            else -> null
+        }
+    }
+    val parsedAgent = parsedInput?.let { (name, _, isAgent) ->
+        if (isAgent) name else when (name) {
+            "review" -> "oracle"
+            "fix" -> "fixer"
+            "find", "search" -> "explorer"
+            "explain", "docs" -> "librarian"
+            "plan" -> "plan"
+            else -> null
+        }
+    }
+    val parsedRest = parsedInput?.second?.ifBlank { null }
 
     // Helper to process picked URIs
     fun processUris(uris: List<Uri>) {
@@ -608,6 +648,60 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                     }
                 }
 
+                // ── @agent / /command indicator pill ──
+                if (parsedInput != null && parsedAgent != null) {
+                    val label = if (parsedInput.third) "@${parsedInput.first}" else "/${parsedInput.first}"
+                    Row(
+                        Modifier
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(c.accent.copy(alpha = 0.10f))
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(label, style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
+                        Text(parsedRest ?: "Type to prompt ${shortAgent(parsedAgent ?: "")}…",
+                            style = OcType.mono.copy(fontSize = 11.sp), color = c.ink3)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+
+                // ── / command autocomplete dropdown ──
+                AnimatedVisibility(
+                    visible = parsedInput != null && !parsedInput.third && parsedRest.isNullOrBlank(),
+                ) {
+                    val slashCommands = listOf(
+                        "review" to "Code review",
+                        "fix" to "Fix bugs",
+                        "find" to "Search codebase",
+                        "explain" to "Explain code",
+                        "plan" to "Create plan",
+                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 12.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        slashCommands.forEach { (cmd, desc) ->
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(c.surface2)
+                                    .pressable { inputText = "/$cmd " }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Column {
+                                    Text("/$cmd", style = OcType.monoStrong.copy(fontSize = 12.sp), color = c.accent)
+                                    Text(desc, style = OcType.mono.copy(fontSize = 9.sp), color = c.ink4)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Input bar: [+ expandable] [text field...] [send]
                 Row(
                     Modifier
@@ -741,34 +835,37 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         val cfg = prefs.config.first()
                                         val api = OpenCodeApi(cfg)
                                         api.abort(sessionId)
-        // Look up subtask worker session (if any)
-        api.listSessions()
-            .onSuccess { sessions ->
-                subtaskWorkerSid = sessions
-                    .firstOrNull { it.title.startsWith("Subtask worker from $sessionId") }
-                    ?.id
-            }
-        api.close()
+                                        api.close()
                                         isSending = false
                                         streamingText = ""
                                     }
                                     return@pressable
                                 }
                                 if (inputText.isBlank()) return@pressable
-                                val content = inputText
+                                // Use parsed text + agent when @agent or /command detected
+                                val sendText: String
+                                val sendAgent: String?
+                                if (parsedInput != null) {
+                                    sendText = parsedRest ?: inputText
+                                    sendAgent = parsedAgent ?: selectedAgent
+                                } else {
+                                    sendText = inputText
+                                    sendAgent = selectedAgent
+                                }
+                                if (sendText.isBlank()) return@pressable
                                 inputText = ""
                                 isSending = true
                                 streamingText = ""
                                 // Build parts: text + attachments
                                 val parts = mutableListOf<PromptPart>()
                                 val myAttachments = attachments.toList()
-                                parts.add(PromptPart(type = "text", text = content))
+                                parts.add(PromptPart(type = "text", text = sendText))
                                 myAttachments.forEach { att ->
                                     parts.add(PromptPart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
                                 }
                                 attachments = emptyList()
                                 val msgParts = mutableListOf<MessagePart>()
-                                if (content.isNotBlank()) msgParts.add(MessagePart(type = "text", text = content))
+                                if (sendText.isNotBlank()) msgParts.add(MessagePart(type = "text", text = sendText))
                                 myAttachments.forEach { att ->
                                     msgParts.add(MessagePart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
                                 }
@@ -780,7 +877,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 scope.launch {
                                     val cfg = prefs.config.first()
                                     val api = OpenCodeApi(cfg)
-                                    api.sendPrompt(sessionId, parts, agent = selectedAgent, model = selectedModel)
+                                    api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
                                         .onSuccess { assistantMsg ->
                                             messages = messages + assistantMsg
                                             isSending = false
