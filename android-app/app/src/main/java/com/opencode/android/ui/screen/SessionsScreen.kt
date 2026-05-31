@@ -148,7 +148,11 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                     Text("online", style = OcType.mono, color = c.accent)
                 }
                 Spacer(Modifier.weight(1f))
-                Text("${sessions.size} sessions", style = OcType.mono, color = c.ink3)
+                val count = sessions.size
+                Text(
+                    if (count > 99) "99+ sessions" else "$count sessions",
+                    style = OcType.mono, color = c.ink3,
+                )
             }
 
             Hairline()

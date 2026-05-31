@@ -184,8 +184,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         api.getMessages(sessionId)
             .onSuccess { msgs ->
                 messages = msgs.takeLast(50)
-                // Extract initial model from last assistant message
-                msgs.firstOrNull { it.info.role == "assistant" }?.info?.let { info ->
+                // Extract model from last assistant message (syncs with desktop/other clients)
+                msgs.lastOrNull { it.info.role == "assistant" }?.info?.let { info ->
                     if (info.providerID != null && info.modelID != null) {
                         selectedModel = ModelRef(info.providerID, info.modelID)
                     }
@@ -489,8 +489,25 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 MessageBubble(
                                     msg,
                                     onSubagentClick = { sid, _ ->
-                                        val target = if (sid == sessionId) subtaskWorkerSid else sid
-                                        if (target != null) onSubagentNavigate(target)
+                                        val target = if (sid == sessionId || sid.isBlank()) subtaskWorkerSid else sid
+                                        if (target != null) {
+                                            onSubagentNavigate(target)
+                                        } else {
+                                            // Lazy lookup: search for subtask worker on click
+                                            scope.launch {
+                                                val api = OpenCodeApi(prefs.config.first())
+                                                val found = api.listSessions().getOrNull()
+                                                    ?.firstOrNull { it.title.startsWith("Subtask worker from $sessionId") }
+                                                    ?.id
+                                                api.close()
+                                                if (found != null) {
+                                                    subtaskWorkerSid = found
+                                                    onSubagentNavigate(found)
+                                                } else {
+                                                    errorMsg = "Subagent session not found"
+                                                }
+                                            }
+                                        }
                                     },
                                 )
                             }

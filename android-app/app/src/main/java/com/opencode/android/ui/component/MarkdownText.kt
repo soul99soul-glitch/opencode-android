@@ -2,6 +2,7 @@ package com.opencode.android.ui.component
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import com.mikepenz.markdown.m3.Markdown
@@ -11,17 +12,13 @@ import com.mikepenz.markdown.model.rememberMarkdownState
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcType
 
-/**
- * Plain 风格的 Markdown 渲染组件。
- *
- * 支持: **粗体** / *斜体* / `行内代码` / ```代码块``` / 列表 / 标题 / 链接 / 引用 / 删除线
- * 样式统一走 OcColors + OcType。
- */
 @Composable
 fun MarkdownText(
     text: String,
     modifier: Modifier = Modifier,
     style: TextStyle = OcType.body,
+    textColor: Color = LocalOcColors.current.ink,
+    codeBg: Color = LocalOcColors.current.codeBg,
 ) {
     val c = LocalOcColors.current
 
@@ -31,9 +28,9 @@ fun MarkdownText(
         markdownState = state,
         modifier = modifier,
         colors = markdownColor(
-            text = c.ink,
-            codeBackground = c.codeBg,
-            inlineCodeBackground = c.codeBg,
+            text = textColor,
+            codeBackground = codeBg,
+            inlineCodeBackground = codeBg,
             dividerColor = c.line,
         ),
         typography = markdownTypography(

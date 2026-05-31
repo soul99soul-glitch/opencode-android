@@ -2,6 +2,7 @@ package com.opencode.android.ui.component
 
 import android.graphics.BitmapFactory
 import android.util.Base64
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -58,13 +59,31 @@ fun MessageBubble(
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     contentAlignment = Alignment.CenterEnd,
                 ) {
-                    Column {
-                        textParts.forEach { part ->
-                            MarkdownText(
-                                text = part.text ?: "",
-                                style = OcType.body.copy(color = c.userInk),
-                            )
-                            Spacer(Modifier.height(6.dp))
+                    SelectionContainer {
+                        Column {
+                            textParts.forEach { part ->
+                                val isUserBgDark = (c.userBg.red + c.userBg.green + c.userBg.blue) / 3f < 0.5f
+                                val userCodeBg = if (isUserBgDark) {
+                                    c.userBg.copy(
+                                        red = (c.userBg.red + 0.08f).coerceAtMost(1f),
+                                        green = (c.userBg.green + 0.08f).coerceAtMost(1f),
+                                        blue = (c.userBg.blue + 0.08f).coerceAtMost(1f),
+                                    )
+                                } else {
+                                    c.userBg.copy(
+                                        red = (c.userBg.red - 0.06f).coerceAtLeast(0f),
+                                        green = (c.userBg.green - 0.06f).coerceAtLeast(0f),
+                                        blue = (c.userBg.blue - 0.06f).coerceAtLeast(0f),
+                                    )
+                                }
+                                MarkdownText(
+                                    text = part.text ?: "",
+                                    style = OcType.body.copy(color = c.userInk),
+                                    textColor = c.userInk,
+                                    codeBg = userCodeBg,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                            }
                         }
                     }
                 }
@@ -112,10 +131,12 @@ fun MessageBubble(
                 message.parts.forEach { part ->
                     when (part.type) {
                         "text" -> {
-                            MarkdownText(
-                                text = part.text ?: "",
-                                style = OcType.body,
-                            )
+                            SelectionContainer {
+                                MarkdownText(
+                                    text = part.text ?: "",
+                                    style = OcType.body,
+                                )
+                            }
                             Spacer(Modifier.height(6.dp))
                         }
                         "tool" -> {
@@ -309,7 +330,7 @@ private fun SubagentCapsule(agent: String, status: String, onClick: (() -> Unit)
     Row(
         Modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(if (isRunning) c.accent.copy(alpha = 0.12f) else c.surface2)
+            .background(c.accent.copy(alpha = 0.10f))
             .then(if (onClick != null) Modifier.pressable { onClick() } else Modifier)
             .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -325,7 +346,7 @@ private fun SubagentCapsule(agent: String, status: String, onClick: (() -> Unit)
         Text(
             "@$short",
             style = OcType.mono.copy(fontSize = 11.sp),
-            color = if (isRunning) c.accent else c.ink2,
+            color = c.accent,
         )
         Text(
             if (isRunning) "running" else "done",
