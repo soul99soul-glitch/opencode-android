@@ -2,19 +2,13 @@ package com.opencode.android.ui.component
 
 import android.graphics.BitmapFactory
 import android.util.Base64
-import androidx.compose.animation.*
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.spring
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -34,14 +28,15 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.opencode.android.data.model.Message
-import com.opencode.android.data.model.MessagePart
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcUserBubbleShape
 import com.opencode.android.ui.theme.OcType
-import kotlin.math.roundToInt
 
 @Composable
-fun MessageBubble(message: Message) {
+fun MessageBubble(
+    message: Message,
+    onSubagentClick: ((sessionId: String, agentName: String) -> Unit)? = null,
+) {
     val isUser = message.info.role == "user"
     val c = LocalOcColors.current
 
@@ -77,7 +72,8 @@ fun MessageBubble(message: Message) {
 
             // ── Media attachments below bubble ──
             mediaParts.forEach { part ->
-                val isImage = part.mime?.startsWith("image/") == true
+                val isImage = part.type == "image"
+                    || part.mime?.startsWith("image/") == true
                     || (part.url?.contains("base64,") == true && part.mime == null)
                 if (isImage) {
                     val bitmap = remember(part.url, part.text) {
@@ -94,7 +90,7 @@ fun MessageBubble(message: Message) {
                         UserImageAttachment(bitmap)
                     }
                 } else {
-                    val name = part.filename ?: part.text ?: "file"
+                    val name = part.filename ?: part.mime ?: "file"
                     FileCapsule(name)
                 }
             }
@@ -125,20 +121,33 @@ fun MessageBubble(message: Message) {
                         "tool" -> {
                             val toolName = part.tool ?: "tool"
                             val inputObj = part.state?.input
-                            val arg = inputObj?.entries?.firstOrNull()?.value?.toString()?.trim('"')?.take(60)
-                                ?: ""
-                            val status = part.state?.status ?: ""
-                            val inputDetail = inputObj?.entries?.joinToString("\n") { (k, v) ->
-                                "$k: ${v.toString().trim('"')}"
+                            val subagentType = inputObj?.get("subagent_type")?.toString()?.trim('"')
+                            val subSid = part.sessionID
+
+                            // Task tool with subagent → clickable capsule
+                            if (toolName == "task" && subagentType != null && subSid != null && onSubagentClick != null) {
+                                SubagentCapsule(
+                                    agent = subagentType,
+                                    status = part.state?.status ?: "",
+                                    onClick = { onSubagentClick(subSid, subagentType) },
+                                )
+                                Spacer(Modifier.height(3.dp))
+                            } else {
+                                val arg = inputObj?.entries?.firstOrNull()?.value?.toString()?.trim('"')?.take(60)
+                                    ?: ""
+                                val status = part.state?.status ?: ""
+                                val inputDetail = inputObj?.entries?.joinToString("\n") { (k, v) ->
+                                    "$k: ${v.toString().trim('"')}"
+                                }
+                                ToolCallRow(
+                                    tool = toolName,
+                                    arg = arg,
+                                    status = if (status == "completed") "done" else status,
+                                    output = part.state?.output?.take(2000),
+                                    input = inputDetail,
+                                )
+                                Spacer(Modifier.height(3.dp))
                             }
-                            ToolCallRow(
-                                tool = toolName,
-                                arg = arg,
-                                status = if (status == "completed") "done" else status,
-                                output = part.state?.output?.take(2000),
-                                input = inputDetail,
-                            )
-                            Spacer(Modifier.height(3.dp))
                         }
                         "tool-invocation" -> ToolCallRow(
                             tool = part.type,
@@ -175,7 +184,7 @@ private fun UserImageAttachment(bitmap: androidx.compose.ui.graphics.ImageBitmap
         bitmap, "attached image",
         Modifier
             .padding(top = 6.dp)
-            .widthIn(max = 280.dp)
+            .widthIn(max = 140.dp)
             .clip(RoundedCornerShape(10.dp))
             .clickable { showOverlay = true },
         contentScale = ContentScale.FillWidth,
@@ -193,8 +202,7 @@ private fun ImageOverlay(
     bitmap: androidx.compose.ui.graphics.ImageBitmap,
     onDismiss: () -> Unit,
 ) {
-    val offsetY = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
+    var dragOffset by remember { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
     val dismissThresholdPx = with(density) { 150.dp.toPx() }
 
@@ -214,18 +222,14 @@ private fun ImageOverlay(
                 .pointerInput(Unit) {
                     detectVerticalDragGestures(
                         onDragEnd = {
-                            scope.launch {
-                                if (kotlin.math.abs(offsetY.value) > dismissThresholdPx) {
-                                    onDismiss()
-                                } else {
-                                    offsetY.animateTo(0f, spring())
-                                }
+                            if (kotlin.math.abs(dragOffset) > dismissThresholdPx) {
+                                onDismiss()
+                            } else {
+                                dragOffset = 0f
                             }
                         },
                         onVerticalDrag = { _, dragAmount ->
-                            scope.launch {
-                                offsetY.snapTo(offsetY.value + dragAmount)
-                            }
+                            dragOffset += dragAmount
                         },
                     )
                 },
@@ -236,8 +240,8 @@ private fun ImageOverlay(
                 Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
-                        translationY = offsetY.value
-                        alpha = 1f - (kotlin.math.abs(offsetY.value) / (dismissThresholdPx * 2)).coerceIn(0f, 1f)
+                        translationY = dragOffset
+                        alpha = 1f - (kotlin.math.abs(dragOffset) / (dismissThresholdPx * 2)).coerceIn(0f, 1f)
                     },
                 contentScale = ContentScale.Fit,
             )
@@ -272,6 +276,57 @@ fun FileCapsule(filename: String, modifier: Modifier = Modifier) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false),
+        )
+    }
+}
+
+// ── Subagent capsule: clickable pill showing agent name ──
+
+private fun toShortAgent(agent: String): String = when (agent) {
+    "orchestrator" -> "orch"
+    "designer"    -> "dsn"
+    "fixer"       -> "fix"
+    "explorer"    -> "exp"
+    "librarian"   -> "lib"
+    "oracle"      -> "ora"
+    "councillor"  -> "cou"
+    "code"        -> "code"
+    "plan"        -> "plan"
+    "build"       -> "build"
+    else          -> agent.take(4)
+}
+
+@Composable
+private fun SubagentCapsule(agent: String, status: String, onClick: () -> Unit) {
+    val c = LocalOcColors.current
+    val short = toShortAgent(agent)
+    val isRunning = status == "running" || status == "queued"
+
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isRunning) c.accent.copy(alpha = 0.12f) else c.surface2)
+            .pressable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (isRunning) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .background(c.accent, RoundedCornerShape(3.dp)),
+            )
+        }
+        Text(
+            "@$short",
+            style = OcType.mono.copy(fontSize = 11.sp),
+            color = if (isRunning) c.accent else c.ink2,
+        )
+        Text(
+            if (isRunning) "running" else "done",
+            style = OcType.mono.copy(fontSize = 10.sp),
+            color = c.ink4,
         )
     }
 }

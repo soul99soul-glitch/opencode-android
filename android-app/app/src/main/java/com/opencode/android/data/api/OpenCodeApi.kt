@@ -134,9 +134,18 @@ class OpenCodeApi(config: ServerConfig) {
             setBody(PromptRequest(parts = parts, agent = agent, model = model))
         }
         if (response.status.value in 200..299) {
-            response.body<Message>()
+            val raw = response.bodyAsText()
+            // Check if server returned HTML error page instead of JSON
+            if (raw.trimStart().startsWith("<!DOCTYPE") || raw.trimStart().startsWith("<html")) {
+                throw Exception("Server returned HTML (${response.status.value})")
+            }
+            if (raw.isBlank()) {
+                throw Exception("Server returned empty response (${response.status.value})")
+            }
+            json.decodeFromString<Message>(raw)
         } else {
-            throw Exception("HTTP ${response.status.value}")
+            val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
+            throw Exception("HTTP ${response.status.value}: $body")
         }
     }
 
@@ -151,7 +160,7 @@ class OpenCodeApi(config: ServerConfig) {
             throw Exception("HTTP ${response.status.value}")
         }
         val body = response.body<ProviderResponse>()
-        body.all.filter { it.models.isNotEmpty() }
+        body.all.filter { it.source == "config" }
     }
 
     /**

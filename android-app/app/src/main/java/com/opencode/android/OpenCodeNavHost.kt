@@ -94,7 +94,12 @@ fun OpenCodeNavHost() {
         ) { backStackEntry ->
             val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
             val title = backStackEntry.arguments?.getString("title")?.ifBlank { null }
-            ChatScreen(sessionId = sessionId, sessionTitle = title, onBack = { navController.popBackStack() })
+            ChatScreen(
+                sessionId = sessionId,
+                sessionTitle = title,
+                onBack = { navController.popBackStack() },
+                onSubagentNavigate = { subId -> navController.navigate("chat/$subId") },
+            )
         }
     }
 }

@@ -109,7 +109,7 @@ private fun shortAgent(agent: String?): String = when (agent) {
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @Composable
-fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
+fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onSubagentNavigate: (sessionId: String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { PreferencesRepository(context) }
@@ -484,7 +484,12 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                                     }
                                 }
                             }
-                            items(messages.asReversed(), key = { it.info.id }) { MessageBubble(it) }
+                            items(messages.asReversed(), key = { it.info.id }) { msg ->
+                                MessageBubble(
+                                    msg,
+                                    onSubagentClick = { sid, _ -> onSubagentNavigate(sid) },
+                                )
+                            }
                         }
 
                         // Scroll-to-bottom FAB
@@ -769,7 +774,10 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                                             val api2 = OpenCodeApi(cfg)
                                             api2.getMessages(sessionId).onSuccess { messages = it }
                                             api2.close()
-                                            errorMsg = it.message
+                                            val msg = it.message ?: "Unknown error"
+                                            errorMsg = if (msg.contains("No suitable converter") || msg.contains("SerializationException"))
+                                                "Unexpected server response"
+                                            else msg.take(120)
                                             isSending = false
                                         }
                                     api.close()
@@ -813,7 +821,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
         ) { data ->
             Box(
                 Modifier
-                    .background(c.accent, RoundedCornerShape(8.dp))
+                    .background(c.accent, RoundedCornerShape(0.dp))
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             ) {
                 Text(data.visuals.message, style = OcType.mono, color = c.accentInk)
