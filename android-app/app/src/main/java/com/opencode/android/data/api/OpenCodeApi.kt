@@ -210,5 +210,5 @@ class OpenCodeApi(config: ServerConfig) {
         }
     }
 
-    fun close() { client.close() }
+    fun close() { client.close(); longPollClient.close() }
 }

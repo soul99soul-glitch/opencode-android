@@ -159,20 +159,24 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val spaceIdx = trimmed.indexOf(' ')
                 val cmd = if (spaceIdx > 0) trimmed.substring(1, spaceIdx)
                     else trimmed.substring(1)
+                if (cmd.isBlank()) return@remember null
                 val rest = if (spaceIdx > 0) trimmed.substring(spaceIdx + 1).trimStart() else ""
-                Triple(cmd, rest, false) // isAgent=false, is slash command
+                Triple(cmd, rest, false)
             }
             else -> null
         }
     }
     val parsedAgent = parsedInput?.let { (name, _, isAgent) ->
-        if (isAgent) name else when (name) {
-            "review" -> "oracle"
-            "fix" -> "fixer"
-            "find", "search" -> "explorer"
-            "explain", "docs" -> "librarian"
-            "plan" -> "plan"
-            else -> null
+        if (isAgent) name else {
+            val lower = name.lowercase()
+            when (lower) {
+                "review" -> "oracle"
+                "fix" -> "fixer"
+                "find", "search" -> "explorer"
+                "explain", "docs" -> "librarian"
+                "plan" -> "plan"
+                else -> null
+            }
         }
     }
     val parsedRest = parsedInput?.second?.ifBlank { null }
@@ -946,13 +950,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 val sendText: String
                                 val sendAgent: String?
                                 if (parsedInput != null) {
-                                    // For skills (no mapped agent), send full text including /skillname
-                                    val isSkill = !parsedInput.third && parsedAgent == null
+                                    // For skills: only treat as skill if not a mapped command AND skill name is known
+                                    val isSkill = !parsedInput.third && parsedAgent == null &&
+                                        skills.any { it.name.equals(parsedInput.first, ignoreCase = true) }
                                     sendText = if (isSkill) rawText else (parsedRest ?: "")
-                                    sendAgent = parsedAgent ?: selectedAgent
+                                    sendAgent = parsedAgent ?: selectedAgent ?: "orchestrator"
                                 } else {
                                     sendText = rawText
-                                    sendAgent = selectedAgent
+                                    sendAgent = selectedAgent ?: "orchestrator"
                                 }
                                 if (sendText.isBlank()) return@pressable
                                 inputText = TextFieldValue("")
