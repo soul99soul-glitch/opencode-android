@@ -13,8 +13,10 @@
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
         android:label="OpenCode"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
-        android:theme="@style/Theme.OpenCode">
+        android:theme="@style/Theme.OpenCode"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"

@@ -1,33 +1,19 @@
 package com.opencode.android.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 
-private val DarkColors = darkColorScheme(
-    primary = Primary,
-    onPrimary = Color.White,
-    primaryContainer = PrimaryDim,
-    onPrimaryContainer = Color.White,
-    secondary = Secondary,
-    onSecondary = Color.White,
-    background = Background,
-    onBackground = TextPrimary,
-    surface = Surface,
-    onSurface = TextPrimary,
-    surfaceVariant = SurfaceVariant,
-    onSurfaceVariant = TextSecondary,
-    outline = Border,
-    outlineVariant = TextMuted,
-    error = Error,
-    onError = Color.White,
-)
-
+/**
+ * Legacy theme bridge — no longer used for styling.
+ * All visual tokens live in OcColors, accessed via LocalOcColors.current.
+ * This file only exists to satisfy any leftover imports.
+ */
 @Composable
-fun OpenCodeTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = DarkColors,
-        typography = Typography(),
-        content = content
-    )
+fun OpenCodeTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit
+) {
+    // Delegate to OcTheme which sets both LocalOcColors and MaterialTheme
+    OcTheme(darkTheme = darkTheme, content = content)
 }

@@ -2,25 +2,29 @@ package com.opencode.android.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.OpenCodeApi
 import com.opencode.android.data.model.ServerConfig
 import com.opencode.android.data.repository.PreferencesRepository
-import com.opencode.android.ui.theme.*
+import com.opencode.android.ui.component.BlinkingCursor
+import com.opencode.android.ui.component.MonoLabel
+import com.opencode.android.ui.component.OcButton
+import com.opencode.android.ui.component.OcButtonStyle
+import com.opencode.android.ui.component.UnderlineField
+import com.opencode.android.ui.theme.LocalOcColors
+import com.opencode.android.ui.theme.OcType
 import kotlinx.coroutines.launch
 
 @Composable
@@ -28,48 +32,79 @@ fun SetupScreen(onComplete: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { PreferencesRepository(context) }
+    val c = LocalOcColors.current
 
     var host by remember { mutableStateOf("127.0.0.1") }
     var port by remember { mutableStateOf("4096") }
     var password by remember { mutableStateOf("") }
     var directory by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
     var isConnecting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(Background).padding(24.dp).verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+        Modifier
+            .fillMaxSize()
+            .background(c.bg)
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 28.dp),
     ) {
-        Icon(Icons.Default.Code, null, modifier = Modifier.size(72.dp), tint = Primary)
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("Welcome to OpenCode", style = MaterialTheme.typography.headlineMedium, color = TextPrimary)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("Connect to your OpenCode server", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-        Spacer(modifier = Modifier.height(32.dp))
-
-        OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text("Host") }, placeholder = { Text("127.0.0.1") }, singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Icon(Icons.Default.Dns, null, tint = TextSecondary) }, shape = RoundedCornerShape(12.dp), colors = fc())
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(value = port, onValueChange = { port = it }, label = { Text("Port") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), leadingIcon = { Icon(Icons.Default.SettingsEthernet, null, tint = TextSecondary) }, shape = RoundedCornerShape(12.dp), colors = fc())
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(), leadingIcon = { Icon(Icons.Default.Lock, null, tint = TextSecondary) }, trailingIcon = { IconButton(onClick = { passwordVisible = !passwordVisible }) { Icon(if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, "Toggle password visibility", tint = TextSecondary) } }, shape = RoundedCornerShape(12.dp), colors = fc())
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(value = directory, onValueChange = { directory = it }, label = { Text("Project Directory") }, placeholder = { Text("/home/user/project") }, singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Icon(Icons.Default.Folder, null, tint = TextSecondary) }, shape = RoundedCornerShape(12.dp), colors = fc())
-        Spacer(modifier = Modifier.height(24.dp))
-
-        if (error != null) {
-            Surface(shape = RoundedCornerShape(10.dp), color = Error.copy(alpha = 0.15f)) {
-                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.ErrorOutline, null, tint = Error, modifier = Modifier.size(18.dp))
-                    Text(error ?: "", color = Error, style = MaterialTheme.typography.bodySmall)
-                }
+        // ── Brand ──
+        Column(
+            Modifier.fillMaxWidth().padding(top = 46.dp, bottom = 40.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier.size(60.dp).clip(RoundedCornerShape(17.dp)).background(c.ink),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("</>", style = OcType.monoStrong.copy(fontSize = 15.sp), color = c.bg)
             }
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(Modifier.height(26.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("opencode", style = OcType.brand, color = c.ink)
+                BlinkingCursor(color = c.accent)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("连接到你的 OpenCode 服务器", style = OcType.body, color = c.ink2)
         }
 
-        Button(
+        // ── Fields ──
+        Column(verticalArrangement = Arrangement.spacedBy(22.dp)) {
+            UnderlineField(host, { host = it }, "> HOST", leading = { GlyphServer() })
+            UnderlineField(port, { port = it }, "> PORT", leading = { GlyphPorts() }, keyboardType = KeyboardType.Number)
+            UnderlineField(password, { password = it }, "> PASSWORD", leading = { GlyphLock() }, placeholder = "Optional", password = true)
+            UnderlineField(directory, { directory = it }, "> DIRECTORY", leading = { GlyphFolder() }, placeholder = "~/projects/opencode")
+        }
+
+        // ── Endpoint preview ──
+        Spacer(Modifier.height(22.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Text("→ ", style = OcType.mono, color = c.ink4)
+            Text(host.ifEmpty { "host" }, style = OcType.mono, color = c.ink2)
+            Text(":", style = OcType.mono, color = c.ink4)
+            Text(port.ifEmpty { "port" }, style = OcType.mono, color = c.accent)
+        }
+
+        // ── Error ──
+        if (error != null) {
+            Spacer(Modifier.height(14.dp))
+            Text(error ?: "", style = OcType.mono, color = c.accent.copy(alpha = 0.8f))
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        // ── Connect button ──
+        OcButton(
+            text = "Connect",
+            style = OcButtonStyle.Primary,
+            loading = isConnecting,
             onClick = {
-                error = null; isConnecting = true
+                error = null
+                isConnecting = true
                 scope.launch {
                     val config = ServerConfig(host, port.toIntOrNull() ?: 4096, password, directory)
                     val api = OpenCodeApi(config)
@@ -77,28 +112,39 @@ fun SetupScreen(onComplete: () -> Unit) {
                     api.close()
                     isConnecting = false
                     result.onSuccess {
-                        if (it.healthy) { prefs.saveConfig(config); prefs.setSetupDone(true); onComplete() }
-                        else error = "Server unhealthy"
-                    }.onFailure { error = "Connection failed: ${it.message}" }
+                        if (it.healthy) {
+                            prefs.saveConfig(config)
+                            prefs.setSetupDone(true)
+                            onComplete()
+                        } else {
+                            error = "Server unhealthy"
+                        }
+                    }.onFailure {
+                        error = "Connection failed: ${it.message}"
+                    }
                 }
             },
-            enabled = host.isNotBlank() && !isConnecting,
-            modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Primary, disabledContainerColor = SurfaceVariant)
-        ) {
-            if (isConnecting) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Background)
-            else { Icon(Icons.Default.PowerSettingsNew, null); Spacer(modifier = Modifier.width(8.dp)); Text("Connect", style = MaterialTheme.typography.titleMedium) }
+        )
+
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Text("opencode serve", style = OcType.mono, color = c.ink3)
+            Text(" — or use built-in local service", style = OcType.secondary, color = c.ink4)
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-        Surface(shape = RoundedCornerShape(10.dp), color = SurfaceVariant.copy(alpha = 0.5f)) {
-            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(Icons.Default.Info, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-                Text("Run 'opencode serve' on your computer, or use the local server built into this app.", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-            }
-        }
+        Spacer(Modifier.height(28.dp))
     }
 }
 
+/* Placeholder glyphs — stroke style, mono, ink3 tint */
 @Composable
-private fun fc() = OutlinedTextFieldDefaults.colors(focusedBorderColor = Primary, unfocusedBorderColor = Border, focusedContainerColor = SurfaceVariant.copy(alpha = 0.3f), unfocusedContainerColor = SurfaceVariant.copy(alpha = 0.3f), cursorColor = Primary, focusedLabelColor = Primary, unfocusedLabelColor = TextMuted)
+private fun GlyphServer() { Text("☱", style = OcType.mono.copy(fontSize = 16.sp), color = LocalOcColors.current.ink3) }
+
+@Composable
+private fun GlyphPorts() { Text("◈", style = OcType.mono.copy(fontSize = 16.sp), color = LocalOcColors.current.ink3) }
+
+@Composable
+private fun GlyphLock() { Text("◻", style = OcType.mono.copy(fontSize = 16.sp), color = LocalOcColors.current.ink3) }
+
+@Composable
+private fun GlyphFolder() { Text("◇", style = OcType.mono.copy(fontSize = 16.sp), color = LocalOcColors.current.ink3) }

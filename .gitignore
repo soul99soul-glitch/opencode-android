@@ -37,3 +37,8 @@ Thumbs.db
 *.p12
 .env
 .env.local
+.kotlin/
+*.bak
+android-compose-ref/
+opencode mobile.zip
+Plain 实现说明书.md

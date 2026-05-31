@@ -40,8 +40,9 @@ class OpenCodeApi(config: ServerConfig) {
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(json) }
         install(HttpTimeout) {
-            requestTimeoutMillis = 60_000
+            requestTimeoutMillis = 120_000
             connectTimeoutMillis = 10_000
+            socketTimeoutMillis = 120_000
         }
         defaultRequest {
             authHeader?.let { header("Authorization", it) }
@@ -49,34 +50,63 @@ class OpenCodeApi(config: ServerConfig) {
         }
     }
 
-    suspend fun health(): Result<HealthResponse> = runCatching {
-        client.get("$baseUrl/global/health").body()
+    // Client with no timeout for long-running operations (send prompt, abort)
+    private val longPollClient = HttpClient(OkHttp) {
+        install(ContentNegotiation) { json(json) }
+        install(HttpTimeout) {
+            requestTimeoutMillis = Long.MAX_VALUE
+            connectTimeoutMillis = 10_000
+            socketTimeoutMillis = Long.MAX_VALUE
+        }
+        defaultRequest {
+            authHeader?.let { header("Authorization", it) }
+            directoryHeader?.let { header("x-opencode-directory", it) }
+        }
     }
 
-    suspend fun listSessions(): Result<List<Session>> = runCatching {
-        client.get("$baseUrl/session").body()
+    private suspend inline fun <reified T> safeRequest(request: suspend () -> HttpResponse): Result<T> = runCatching {
+        val response = request()
+        if (response.status.value in 200..299) {
+            response.body<T>()
+        } else {
+            throw Exception("HTTP ${response.status.value}: ${response.status.description}")
+        }
     }
 
-    suspend fun createSession(title: String? = null): Result<Session> = runCatching {
+    suspend fun health(): Result<HealthResponse> = safeRequest {
+        client.get("$baseUrl/global/health")
+    }
+
+    suspend fun listSessions(): Result<List<Session>> = safeRequest {
+        client.get("$baseUrl/session")
+    }
+
+    suspend fun createSession(title: String? = null): Result<Session> = safeRequest {
         client.post("$baseUrl/session") {
             contentType(ContentType.Application.Json)
             setBody(CreateSessionRequest(title))
-        }.body()
+        }
     }
 
-    suspend fun getMessages(sessionId: String): Result<List<Message>> = runCatching {
-        client.get("$baseUrl/session/$sessionId/message").body()
+    suspend fun getMessages(sessionId: String): Result<List<Message>> = safeRequest {
+        client.get("$baseUrl/session/$sessionId/message")
     }
 
-    suspend fun sendPrompt(sessionId: String, content: String): Result<HttpResponse> = runCatching {
-        client.post("$baseUrl/session/$sessionId/message") {
+    /** Send prompt — API returns the assistant message synchronously in response body */
+    suspend fun sendPrompt(sessionId: String, content: String): Result<Message> = runCatching {
+        val response = longPollClient.post("$baseUrl/session/$sessionId/message") {
             contentType(ContentType.Application.Json)
             setBody(PromptRequest(parts = listOf(PromptPart(text = content))))
+        }
+        if (response.status.value in 200..299) {
+            response.body<Message>()
+        } else {
+            throw Exception("HTTP ${response.status.value}")
         }
     }
 
     suspend fun abort(sessionId: String): Result<HttpResponse> = runCatching {
-        client.post("$baseUrl/session/$sessionId/abort")
+        longPollClient.post("$baseUrl/session/$sessionId/abort")
     }
 
     /**

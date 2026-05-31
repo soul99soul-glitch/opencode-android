@@ -1,6 +1,7 @@
 package com.opencode.android.data.model
 
 import kotlinx.serialization.*
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class ServerConfig(
@@ -22,7 +23,10 @@ data class Session(
     val title: String = "Untitled",
     val directory: String? = null,
     val version: String? = null,
-    val time: SessionTime? = null
+    val time: SessionTime? = null,
+    val agent: String? = null,
+    val messageCount: Int? = null,
+    val preview: String? = null,
 )
 
 @Serializable
@@ -49,20 +53,45 @@ data class PromptPart(
 
 @Serializable
 data class Message(
+    val info: MessageInfo,
+    val parts: List<MessagePart> = emptyList()
+)
+
+@Serializable
+data class MessageInfo(
     val id: String,
     val role: String,
-    val content: String? = null,
-    val parts: List<MessagePart> = emptyList()
+    val agent: String? = null,
+    val modelID: String? = null,
+    val providerID: String? = null,
+    val time: MessageTime? = null
+)
+
+@Serializable
+data class MessageTime(
+    val created: Long = 0,
+    val completed: Long? = null
 )
 
 @Serializable
 data class MessagePart(
     val type: String,
     val text: String? = null,
-    val toolName: String? = null,
-    val toolCallId: String? = null,
-    val args: String? = null,
-    val result: String? = null
+    val id: String? = null,
+    val sessionID: String? = null,
+    val messageID: String? = null,
+    val tool: String? = null,
+    val callID: String? = null,
+    val state: ToolState? = null
+)
+
+@Serializable
+data class ToolState(
+    val status: String = "",
+    val input: JsonObject? = null,
+    val output: String? = null,
+    val metadata: JsonObject? = null,
+    val title: String? = null
 )
 
 @Serializable
