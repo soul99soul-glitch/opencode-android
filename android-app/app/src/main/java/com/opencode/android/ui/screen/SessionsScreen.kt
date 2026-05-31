@@ -82,8 +82,8 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
             val api = OpenCodeApi(cfg)
             api.listSessions()
                 .onSuccess { list ->
-                    // Filter out subagent sessions
-                    val subagentPattern = """(.*\(@\w+ subagent\).*)|(.*subagent 任务.*)|(^Subtask worker .*$)""".toRegex()
+                    // Filter out subagent worker sessions (not parent tasks)
+                    val subagentPattern = """(.*\(@\w+ subagent\).*)|(^Subtask worker .*$)""".toRegex()
                     sessions = list.filter { !subagentPattern.matches(it.title) }
                     error = null
                     sessionPreviews = api.enrichSessions(sessions)

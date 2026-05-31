@@ -128,6 +128,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var inputFocused by remember { mutableStateOf(false) }
     var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
     var showAttachMenu by remember { mutableStateOf(false) }
+    var subtaskWorkerSid by remember { mutableStateOf<String?>(null) }
 
     // Helper to process picked URIs
     fun processUris(uris: List<Uri>) {
@@ -487,7 +488,10 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             items(messages.asReversed(), key = { it.info.id }) { msg ->
                                 MessageBubble(
                                     msg,
-                                    onSubagentClick = { sid, _ -> onSubagentNavigate(sid) },
+                                    onSubagentClick = { sid, _ ->
+                                        val target = if (sid == sessionId) subtaskWorkerSid else sid
+                                        if (target != null) onSubagentNavigate(target)
+                                    },
                                 )
                             }
                         }
@@ -720,7 +724,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         val cfg = prefs.config.first()
                                         val api = OpenCodeApi(cfg)
                                         api.abort(sessionId)
-                                        api.close()
+        // Look up subtask worker session (if any)
+        api.listSessions()
+            .onSuccess { sessions ->
+                subtaskWorkerSid = sessions
+                    .firstOrNull { it.title.startsWith("Subtask worker from $sessionId") }
+                    ?.id
+            }
+        api.close()
                                         isSending = false
                                         streamingText = ""
                                     }

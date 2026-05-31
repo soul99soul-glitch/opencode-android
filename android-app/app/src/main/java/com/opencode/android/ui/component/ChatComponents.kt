@@ -124,13 +124,14 @@ fun MessageBubble(
                             val subagentType = inputObj?.get("subagent_type")?.toString()?.trim('"')
                             val subSid = part.sessionID
 
-                            // Task tool with subagent → clickable capsule (if we have a subagent session id)
-                            if (toolName == "task" && subagentType != null) {
+                            // Task/subtask tool → capsule (with agent name if available)
+                            if (toolName == "task" || toolName == "subtask") {
+                                val agentLabel = subagentType ?: toolName
                                 SubagentCapsule(
-                                    agent = subagentType,
+                                    agent = agentLabel,
                                     status = part.state?.status ?: "",
-                                    onClick = if (subSid != null && onSubagentClick != null)
-                                        {{ onSubagentClick(subSid, subagentType) }}
+                                    onClick = if (onSubagentClick != null)
+                                        {{ onSubagentClick(subSid ?: "", agentLabel) }}
                                     else null,
                                 )
                                 Spacer(Modifier.height(3.dp))
@@ -295,6 +296,7 @@ private fun toShortAgent(agent: String): String = when (agent) {
     "code"        -> "code"
     "plan"        -> "plan"
     "build"       -> "build"
+    "subtask"     -> "sub"
     else          -> agent.take(4)
 }
 
