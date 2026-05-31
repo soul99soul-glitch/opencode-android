@@ -125,6 +125,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var streamingText by remember { mutableStateOf("") }
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
+    var allKnownAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var inputFocused by remember { mutableStateOf(false) }
     var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
@@ -247,6 +248,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         api.fetchAgents()
             .onSuccess { allAgents ->
                 availableAgents = allAgents.filter { it.mode == "primary" && !it.hidden }
+                allKnownAgents = allAgents.filter { !it.hidden && it.mode != "primary" }
                 if (selectedAgent == null) {
                     val default = prefs.defaultAgent.first()
                     selectedAgent = if (availableAgents.any { it.name == default }) default
@@ -675,12 +677,12 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                         )
                         Spacer(Modifier.height(8.dp))
                         if (isAgentPanel) {
-                            // ── @ agent panel: show available agents ──
-                            if (availableAgents.isEmpty()) {
+                            // ── @ agent panel: show all available agents ──
+                            val agents = allKnownAgents
+                            if (agents.isEmpty()) {
                                 Text("Loading agents…", style = OcType.mono.copy(fontSize = 12.sp), color = c.ink4)
                             } else {
-                                availableAgents.forEach { ag ->
-                                    val short = shortAgent(ag.name)
+                                agents.forEach { ag ->
                                     Row(
                                         Modifier
                                             .fillMaxWidth()
@@ -690,8 +692,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     ) {
-                                        Text("@$short", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
-                                        Text(ag.name, style = OcType.mono.copy(fontSize = 12.sp), color = c.ink2)
+                                        Text("@${ag.name}", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
                                     }
                                 }
                             }
@@ -724,7 +725,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
 
                 // ── @agent / /command indicator pill ──
                 if (parsedInput != null && parsedAgent != null && !showCmdPanel) {
-                    val label = if (parsedInput.third) "@${parsedInput.first}" else "/${parsedInput.first}"
+                    val label = if (parsedInput.third) "@${parsedAgent}" else "/${parsedInput.first}"
                     Row(
                         Modifier
                             .padding(horizontal = 16.dp)
