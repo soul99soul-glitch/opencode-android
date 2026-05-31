@@ -92,11 +92,33 @@ class OpenCodeApi(config: ServerConfig) {
         client.get("$baseUrl/session/$sessionId/message")
     }
 
+    /**
+     * Enrich sessions with preview text and message count.
+     * Fetches messages for each session in parallel, takes the last assistant text.
+     */
+    suspend fun enrichSessions(sessions: List<Session>): Map<String, Pair<String?, Int>> {
+        return coroutineScope {
+            sessions.map { session ->
+                async {
+                    val msgs = getMessages(session.id).getOrNull()
+                    val count = msgs?.size ?: 0
+                    val preview = msgs
+                        ?.lastOrNull { it.info.role == "assistant" }
+                        ?.parts
+                        ?.firstOrNull { it.type == "text" && !it.text.isNullOrBlank() }
+                        ?.text
+                        ?.take(120)
+                    session.id to (preview to count)
+                }
+            }.awaitAll().toMap()
+        }
+    }
+
     /** Send prompt — API returns the assistant message synchronously in response body */
-    suspend fun sendPrompt(sessionId: String, content: String): Result<Message> = runCatching {
+    suspend fun sendPrompt(sessionId: String, content: String, agent: String? = null): Result<Message> = runCatching {
         val response = longPollClient.post("$baseUrl/session/$sessionId/message") {
             contentType(ContentType.Application.Json)
-            setBody(PromptRequest(parts = listOf(PromptPart(text = content))))
+            setBody(PromptRequest(parts = listOf(PromptPart(text = content)), agent = agent))
         }
         if (response.status.value in 200..299) {
             response.body<Message>()

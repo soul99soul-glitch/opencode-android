@@ -190,6 +190,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
             .fillMaxSize()
             .background(c.bg)
             .statusBarsPadding()
+            .imePadding()
     ) {
         Column(Modifier.fillMaxSize()) {
             // ── Top bar ──
@@ -382,8 +383,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                     .fillMaxWidth()
                     .background(c.surface)
                     .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .navigationBarsPadding()
-                    .imePadding(),
+                    .navigationBarsPadding(),
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -437,7 +437,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                             scope.launch {
                                 val cfg = prefs.config.first()
                                 val api = OpenCodeApi(cfg)
-                                api.sendPrompt(sessionId, content)
+                                api.sendPrompt(sessionId, content, agent = selectedAgent)
                                     .onSuccess { assistantMsg ->
                                         messages = messages + assistantMsg
                                         isSending = false

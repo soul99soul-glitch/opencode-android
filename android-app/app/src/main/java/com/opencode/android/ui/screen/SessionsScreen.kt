@@ -46,6 +46,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     val c = LocalOcColors.current
 
     var sessions by remember { mutableStateOf<List<Session>>(emptyList()) }
+    var sessionPreviews by remember { mutableStateOf<Map<String, Pair<String?, Int>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var showNewDialog by remember { mutableStateOf(false) }
@@ -58,7 +59,13 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
             val cfg = prefs.config.first()
             hostPort = "${cfg.host}:${cfg.port}"
             val api = OpenCodeApi(cfg)
-            api.listSessions().onSuccess { sessions = it; error = null }.onFailure { error = it.message }
+            api.listSessions()
+                .onSuccess { list ->
+                    sessions = list
+                    error = null
+                    sessionPreviews = api.enrichSessions(list)
+                }
+                .onFailure { error = it.message }
             api.close()
             isLoading = false
         }
@@ -157,7 +164,13 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(sessions, key = { it.id }) { session ->
                             val isActive = session.id == sessions.firstOrNull()?.id
-                            SessionRow(session, active = isActive) { onSessionClick(session.id, session.title) }
+                            val (preview, msgCount) = sessionPreviews[session.id] ?: (null to 0)
+                            SessionRow(
+                                session,
+                                active = isActive,
+                                preview = preview,
+                                messageCount = msgCount,
+                            ) { onSessionClick(session.id, session.title) }
                             Hairline()
                         }
                     }
@@ -276,7 +289,13 @@ private fun relativeTime(epochMs: Long): String {
 }
 
 @Composable
-private fun SessionRow(session: Session, active: Boolean = false, onClick: () -> Unit) {
+private fun SessionRow(
+    session: Session,
+    active: Boolean = false,
+    preview: String? = null,
+    messageCount: Int = 0,
+    onClick: () -> Unit,
+) {
     val c = LocalOcColors.current
     val timeStr = session.time?.updated?.let {
         relativeTime(it)
@@ -316,13 +335,13 @@ private fun SessionRow(session: Session, active: Boolean = false, onClick: () ->
                 Box(Modifier.size(7.dp).clip(CircleShape).background(c.signal))
                 Spacer(Modifier.width(2.dp))
             }
-            Text("${session.messageCount ?: 0} msgs", style = OcType.mono.copy(fontSize = 11.5.sp), color = c.ink3)
+            Text("$messageCount msgs", style = OcType.mono.copy(fontSize = 11.5.sp), color = c.ink3)
         }
-        // Line 3: Preview text
-        if (!session.preview.isNullOrBlank()) {
+        // Line 3: Preview — last assistant message
+        if (!preview.isNullOrBlank()) {
             Spacer(Modifier.height(4.dp))
             Text(
-                session.preview,
+                preview,
                 style = OcType.secondary.copy(fontSize = 13.5.sp),
                 color = c.ink2,
                 maxLines = 1,

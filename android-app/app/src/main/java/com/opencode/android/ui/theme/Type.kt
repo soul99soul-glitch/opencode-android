@@ -1,9 +1,12 @@
 package com.opencode.android.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -13,18 +16,25 @@ import com.opencode.android.R
  * 字体
  *
  * 可变字体:单一 .ttf 文件支持 100–900 全字重。
- * 需要为每个用到的 FontWeight 显式声明 Font 条目,
- * 否则 Compose 会 fallback 到系统字体。
+ * 必须同时指定 weight(匹配键) + variationSettings(驱动 wght 轴),
+ * 否则可变字体始终渲染默认字重。
  *
  * 规则:UI 文案 = Hanken;一切「机器信息」(主机/端口/ID/时间戳/模型名/代码/数量)= Mono。
  * ========================================================================== */
 
+@OptIn(ExperimentalTextApi::class)
 val Hanken = FontFamily(
-    Font(R.font.hanken_grotesk_variable, FontWeight.Normal),
+    Font(R.font.hanken_grotesk_variable, FontWeight.Normal, variationSettings = FontVariation.Settings(FontWeight.Normal, FontStyle.Normal)),
+    Font(R.font.hanken_grotesk_variable, FontWeight.Medium, variationSettings = FontVariation.Settings(FontWeight.Medium, FontStyle.Normal)),
+    Font(R.font.hanken_grotesk_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontWeight.SemiBold, FontStyle.Normal)),
+    Font(R.font.hanken_grotesk_variable, FontWeight.Bold, variationSettings = FontVariation.Settings(FontWeight.Bold, FontStyle.Normal)),
 )
 
+@OptIn(ExperimentalTextApi::class)
 val Mono = FontFamily(
-    Font(R.font.jetbrains_mono_variable, FontWeight.Normal),
+    Font(R.font.jetbrains_mono_variable, FontWeight.Normal, variationSettings = FontVariation.Settings(FontWeight.Normal, FontStyle.Normal)),
+    Font(R.font.jetbrains_mono_variable, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontWeight.SemiBold, FontStyle.Normal)),
+    Font(R.font.jetbrains_mono_variable, FontWeight.Bold, variationSettings = FontVariation.Settings(FontWeight.Bold, FontStyle.Normal)),
 )
 
 /* 等宽数字对齐:tabular-nums + slashed-zero */
@@ -36,7 +46,7 @@ object OcType {
     val brand = TextStyle(fontWeight = FontWeight.Bold, fontSize = 27.sp, letterSpacing = (-0.02).em)
     val titleL = TextStyle(fontFamily = Hanken, fontWeight = FontWeight.Bold, fontSize = 20.sp, letterSpacing = (-0.015).em)
     val title = TextStyle(fontFamily = Hanken, fontWeight = FontWeight.Bold, fontSize = 16.5.sp, letterSpacing = (-0.015).em)
-    val rowTitle = TextStyle(fontFamily = Hanken, fontWeight = FontWeight.Medium, fontSize = 16.5.sp, letterSpacing = (-0.012).em)
+    val rowTitle = TextStyle(fontFamily = Hanken, fontWeight = FontWeight.SemiBold, fontSize = 16.5.sp, letterSpacing = (-0.012).em)
     val body = TextStyle(fontFamily = Hanken, fontWeight = FontWeight.Normal, fontSize = 15.5.sp, lineHeight = 25.sp, letterSpacing = (-0.005).em)
     val bodyStrong = body.copy(fontWeight = FontWeight.Bold)
     val secondary = TextStyle(fontFamily = Hanken, fontWeight = FontWeight.Normal, fontSize = 13.5.sp, letterSpacing = (-0.005).em)

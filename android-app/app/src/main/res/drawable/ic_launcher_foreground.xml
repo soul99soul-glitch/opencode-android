@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OpenCode 浅色版前景层
+  箭头 "›" (#1B1A17 暖白底上的石墨色) + 绿色光标方块 (#5E9C6E)
+  Viewport 108×108，图形居中在 66% 安全区
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 提示符箭头 ">" — stroke only, round cap/join -->
+    <path
+        android:pathData="M38,37 L55,54 L38,71"
+        android:strokeColor="#1B1A17"
+        android:strokeWidth="8.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillType="nonZero" />
+
+    <!-- 光标方块 — 窄竖线光标 -->
+    <path
+        android:pathData="M60,41.5 L67,41.5Q69,41.5 69,43.5L69,66.5Q69,68.5 67,68.5L60,68.5Q58,68.5 58,66.5L58,43.5Q58,41.5 60,41.5Z"
+        android:fillColor="#5E9C6E" />
+
+</vector>

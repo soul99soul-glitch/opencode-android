@@ -42,7 +42,8 @@ data class CreateSessionRequest(
 
 @Serializable
 data class PromptRequest(
-    val parts: List<PromptPart>
+    val parts: List<PromptPart>,
+    val agent: String? = null
 )
 
 @Serializable

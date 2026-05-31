@@ -46,6 +46,7 @@ fun SetupScreen(onComplete: () -> Unit) {
             .fillMaxSize()
             .background(c.bg)
             .statusBarsPadding()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 28.dp),
     ) {
