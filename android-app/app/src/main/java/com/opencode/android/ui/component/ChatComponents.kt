@@ -3,107 +3,103 @@ package com.opencode.android.ui.component
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.opencode.android.data.model.Message
 import com.opencode.android.data.model.MessagePart
 import com.opencode.android.ui.theme.LocalOcColors
-import com.opencode.android.ui.theme.OcBubbleShape
 import com.opencode.android.ui.theme.OcUserBubbleShape
 import com.opencode.android.ui.theme.OcType
+import kotlin.math.roundToInt
 
 @Composable
 fun MessageBubble(message: Message) {
     val isUser = message.info.role == "user"
     val c = LocalOcColors.current
 
+    // Separate text from file/image parts
+    val textParts = message.parts.filter { it.type == "text" }
+    val mediaParts = message.parts.filter { it.type == "file" || it.type == "image" }
+
     Column(
         Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
         if (isUser) {
-            // User: right-aligned dark bubble with asymmetric corners
-            Box(
-                Modifier
-                    .widthIn(max = 310.dp)
-                    .background(c.userBg, OcUserBubbleShape)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                contentAlignment = Alignment.CenterEnd,
-            ) {
-                Column {
-                    message.parts.forEach { part ->
-                        when (part.type) {
-                            "text" -> {
-                                MarkdownText(
-                                    text = part.text ?: "",
-                                    style = OcType.body.copy(color = c.userInk),
-                                )
-                            }
-                            "file", "image" -> {
-                                // Show thumb for images with data URI
-                                val isImage = part.mime?.startsWith("image/") == true
-                                if (isImage) {
-                                    val img = try {
-                                        val dataUri = part.url ?: part.text ?: ""
-                                        val base64Data = dataUri.substringAfter("base64,")
-                                        if (base64Data.isNotEmpty()) {
-                                            val bytes = Base64.decode(base64Data, Base64.DEFAULT)
-                                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                                        } else null
-                                    } catch (_: Exception) { null }
-                                    if (img != null) {
-                                        Row(
-                                            Modifier.padding(top = 4.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Image(img, "attached image",
-                                                Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
-                                                contentScale = ContentScale.Crop)
-                                            if (part.filename != null) {
-                                                Text(part.filename, style = OcType.mono.copy(fontSize = 10.sp, color = c.userInk))
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // File indicator
-                                    Row(
-                                        Modifier.padding(top = 4.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(Icons.Outlined.AttachFile, "file",
-                                            tint = c.userInk.copy(alpha = 0.6f),
-                                            modifier = Modifier.size(14.dp))
-                                        Text(part.filename ?: "file", style = OcType.mono.copy(fontSize = 10.sp, color = c.userInk))
-                                    }
-                                }
-                            }
-                            else -> { /* skip */ }
+            // ── Text bubble (dark, right-aligned) ──
+            if (textParts.isNotEmpty()) {
+                Box(
+                    Modifier
+                        .widthIn(max = 310.dp)
+                        .background(c.userBg, OcUserBubbleShape)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Column {
+                        textParts.forEach { part ->
+                            MarkdownText(
+                                text = part.text ?: "",
+                                style = OcType.body.copy(color = c.userInk),
+                            )
+                            Spacer(Modifier.height(6.dp))
                         }
-                        Spacer(Modifier.height(6.dp))
                     }
                 }
             }
+
+            // ── Media attachments below bubble ──
+            mediaParts.forEach { part ->
+                val isImage = part.mime?.startsWith("image/") == true
+                    || (part.url?.contains("base64,") == true && part.mime == null)
+                if (isImage) {
+                    val bitmap = remember(part.url, part.text) {
+                        try {
+                            val dataUri = part.url ?: part.text ?: ""
+                            val base64Data = dataUri.substringAfter("base64,")
+                            if (base64Data.isNotEmpty()) {
+                                val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                            } else null
+                        } catch (_: Exception) { null }
+                    }
+                    if (bitmap != null) {
+                        UserImageAttachment(bitmap)
+                    }
+                } else {
+                    val name = part.filename ?: part.text ?: "file"
+                    FileCapsule(name)
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
         } else {
             // Assistant: ZERO decoration — no background, no bubble, just content
             Column(Modifier.fillMaxWidth(0.92f)) {
@@ -129,11 +125,9 @@ fun MessageBubble(message: Message) {
                         "tool" -> {
                             val toolName = part.tool ?: "tool"
                             val inputObj = part.state?.input
-                            // Build a short arg description from input fields
                             val arg = inputObj?.entries?.firstOrNull()?.value?.toString()?.trim('"')?.take(60)
                                 ?: ""
                             val status = part.state?.status ?: ""
-                            // Format full input for detail view
                             val inputDetail = inputObj?.entries?.joinToString("\n") { (k, v) ->
                                 "$k: ${v.toString().trim('"')}"
                             }
@@ -168,6 +162,117 @@ fun MessageBubble(message: Message) {
                 }
             }
         }
+    }
+}
+
+// ── User image attachment: rendered below bubble, tap for full-screen ──
+
+@Composable
+private fun UserImageAttachment(bitmap: androidx.compose.ui.graphics.ImageBitmap) {
+    var showOverlay by remember { mutableStateOf(false) }
+
+    Image(
+        bitmap, "attached image",
+        Modifier
+            .padding(top = 6.dp)
+            .widthIn(max = 280.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { showOverlay = true },
+        contentScale = ContentScale.FillWidth,
+    )
+
+    if (showOverlay) {
+        ImageOverlay(bitmap) { showOverlay = false }
+    }
+}
+
+// ── Full-screen image overlay with swipe to dismiss ──
+
+@Composable
+private fun ImageOverlay(
+    bitmap: androidx.compose.ui.graphics.ImageBitmap,
+    onDismiss: () -> Unit,
+) {
+    val offsetY = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 150.dp.toPx() }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable { onDismiss() }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            scope.launch {
+                                if (kotlin.math.abs(offsetY.value) > dismissThresholdPx) {
+                                    onDismiss()
+                                } else {
+                                    offsetY.animateTo(0f, spring())
+                                }
+                            }
+                        },
+                        onVerticalDrag = { _, dragAmount ->
+                            scope.launch {
+                                offsetY.snapTo(offsetY.value + dragAmount)
+                            }
+                        },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                bitmap, null,
+                Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        translationY = offsetY.value
+                        alpha = 1f - (kotlin.math.abs(offsetY.value) / (dismissThresholdPx * 2)).coerceIn(0f, 1f)
+                    },
+                contentScale = ContentScale.Fit,
+            )
+        }
+    }
+}
+
+// ── File attachment capsule: icon + truncated filename ──
+
+@Composable
+fun FileCapsule(filename: String, modifier: Modifier = Modifier) {
+    val c = LocalOcColors.current
+    Row(
+        modifier
+            .padding(top = 6.dp)
+            .widthIn(max = 240.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(c.surface2)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Icon(
+            Icons.Outlined.Description, "file",
+            tint = c.ink3,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            filename,
+            style = OcType.mono.copy(fontSize = 11.sp),
+            color = c.ink2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
     }
 }
 
