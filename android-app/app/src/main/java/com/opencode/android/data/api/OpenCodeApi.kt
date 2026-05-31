@@ -81,10 +81,23 @@ class OpenCodeApi(config: ServerConfig) {
         client.get("$baseUrl/session")
     }
 
+    suspend fun getSession(sessionId: String): Result<Session> = safeRequest {
+        client.get("$baseUrl/session/$sessionId")
+    }
+
+    suspend fun fetchAgents(): Result<List<AgentInfo>> = safeRequest {
+        client.get("$baseUrl/agent")
+    }
+
+    suspend fun deleteSession(sessionId: String): Result<HttpResponse> = runCatching {
+        client.delete("$baseUrl/session/$sessionId")
+    }
+
     suspend fun createSession(title: String? = null): Result<Session> = safeRequest {
         client.post("$baseUrl/session") {
             contentType(ContentType.Application.Json)
-            setBody(CreateSessionRequest(title))
+            if (title != null) setBody(CreateSessionRequest(title))
+            else setBody("{}")
         }
     }
 
@@ -138,7 +151,7 @@ class OpenCodeApi(config: ServerConfig) {
             throw Exception("HTTP ${response.status.value}")
         }
         val body = response.body<ProviderResponse>()
-        body.all.filter { it.source == "config" }
+        body.all.filter { it.models.isNotEmpty() }
     }
 
     /**

@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -48,6 +50,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -59,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -110,12 +116,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
     val json = remember { Json { ignoreUnknownKeys = true; isLenient = true } }
     val c = LocalOcColors.current
 
+    var displayTitle by remember { mutableStateOf(sessionTitle?.ifBlank { null } ?: "新会话") }
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
     var streamingText by remember { mutableStateOf("") }
-    var selectedAgent by remember { mutableStateOf("build") }
+    var selectedAgent by remember { mutableStateOf<String?>(null) }
+    var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var inputFocused by remember { mutableStateOf(false) }
     var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
@@ -168,7 +176,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
         }
     }
 
-    // Load messages + providers + initial model
+    // Load messages + providers + agents + initial model
     LaunchedEffect(sessionId) {
         val config = prefs.config.first()
         val api = OpenCodeApi(config)
@@ -186,6 +194,24 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
         // Fetch configured providers
         api.fetchConfiguredProviders()
             .onSuccess { providers = it }
+        // If no model from history, use defaults from settings
+        if (selectedModel == null) {
+            val defProvider = prefs.defaultModelProvider.first()
+            val defModel = prefs.defaultModelId.first()
+            if (defProvider.isNotBlank() && defModel.isNotBlank()) {
+                selectedModel = ModelRef(defProvider, defModel)
+            }
+        }
+        // Fetch available agents (primary, non-hidden only)
+        api.fetchAgents()
+            .onSuccess { allAgents ->
+                availableAgents = allAgents.filter { it.mode == "primary" && !it.hidden }
+                if (selectedAgent == null) {
+                    val default = prefs.defaultAgent.first()
+                    selectedAgent = if (availableAgents.any { it.name == default }) default
+                    else availableAgents.firstOrNull()?.name
+                }
+            }
         isLoading = false
         api.close()
     }
@@ -290,7 +316,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                 Spacer(Modifier.width(4.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        sessionTitle ?: "Chat",
+                        displayTitle,
                         style = OcType.rowTitle,
                         color = c.ink,
                         maxLines = 1,
@@ -320,59 +346,39 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                         }
                     }
                 }
-                // Agent toggle pill — click to cycle Build/Plan/Orch
-                Box(
-                    Modifier
-                        .pressable {
-                            selectedAgent = when (selectedAgent) {
-                                "build" -> "plan"
-                                "plan" -> "orch"
-                                else -> "build"
+                // Agent toggle pill — click to cycle through available agents
+                if (availableAgents.size > 1 && selectedAgent != null) {
+                    Box(
+                        Modifier
+                            .pressable {
+                                val currentIdx = availableAgents.indexOfFirst { it.name == selectedAgent }
+                                val nextIdx = (currentIdx + 1) % availableAgents.size
+                                selectedAgent = availableAgents[nextIdx].name
                             }
-                        }
-                        .background(c.surface2, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AnimatedContent(
-                        targetState = selectedAgent,
-                        transitionSpec = {
-                            (slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Up, tween(200)) +
-                                fadeIn(tween(150))) togetherWith
-                                (slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Up, tween(200)) +
-                                    fadeOut(tween(100)))
-                        },
-                        label = "agent",
-                    ) { agent ->
-                        Text(
-                            when (agent) {
-                                "plan" -> "Plan"
-                                "orch" -> "Orch"
-                                else -> "Build"
+                            .background(c.surface2, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AnimatedContent(
+                            targetState = selectedAgent,
+                            transitionSpec = {
+                                (slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Up, tween(200)) +
+                                    fadeIn(tween(150))) togetherWith
+                                    (slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Up, tween(200)) +
+                                        fadeOut(tween(100)))
                             },
-                            style = OcType.monoStrong.copy(fontSize = 12.sp),
-                            color = c.ink,
-                        )
+                            label = "agent",
+                        ) { agent ->
+                            Text(
+                                shortAgent(agent),
+                                style = OcType.monoStrong.copy(fontSize = 12.sp),
+                                color = c.ink,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                if (isSending) {
-                    Box(
-                        Modifier.size(44.dp).pressable {
-                            scope.launch {
-                                val cfg = prefs.config.first()
-                                val api = OpenCodeApi(cfg)
-                                api.abort(sessionId)
-                                api.close()
-                                isSending = false
-                                streamingText = ""
-                            }
-                        },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("■", style = OcType.monoStrong.copy(fontSize = 14.sp), color = c.signal)
-                    }
-                }
+                // Stop button inline removed — now part of send button
             }
 
             // Model picker — outside the top bar Row, between Row and Hairline
@@ -584,70 +590,84 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    // + button group: expands to show image/file options
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        // Image button (slides in from left)
-                        AnimatedVisibility(
-                            visible = showAttachMenu,
-                            enter = fadeIn(tween(150)) + slideInHorizontally(initialOffsetX = { -it / 2 }),
-                            exit = fadeOut(tween(100)) + slideOutHorizontally(targetOffsetX = { -it / 2 }),
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(c.surface2)
-                                    .pressable(enabled = !isSending) {
-                                        imagePicker.launch("image/*")
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text("🖼", style = OcType.body.copy(fontSize = 16.sp), color = c.ink3)
-                            }
-                        }
-                        // File button (slides in from left)
-                        AnimatedVisibility(
-                            visible = showAttachMenu,
-                            enter = fadeIn(tween(150)) + slideInHorizontally(initialOffsetX = { -it / 2 }),
-                            exit = fadeOut(tween(100)) + slideOutHorizontally(targetOffsetX = { -it / 2 }),
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(c.surface2)
-                                    .pressable(enabled = !isSending) {
-                                        filePicker.launch("*/*")
-                                    },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text("📎", style = OcType.body.copy(fontSize = 16.sp), color = c.ink3)
-                            }
-                        }
-                        // + toggle button
+                    // + button group: morphs from circle to pill, icons slide right
+                    run {
+                        val animMs = 180
+                        val pillWidth by animateDpAsState(
+                            targetValue = if (showAttachMenu) 114.dp else 44.dp,
+                            animationSpec = tween(animMs),
+                            label = "pillWidth",
+                        )
                         Box(
                             Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(c.surface2)
-                                .pressable(enabled = !isSending) {
-                                    showAttachMenu = !showAttachMenu
-                                },
-                            contentAlignment = Alignment.Center,
+                                .width(pillWidth)
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(c.surface2),
+                            contentAlignment = Alignment.CenterStart,
                         ) {
-                            AnimatedContent(
-                                targetState = showAttachMenu,
-                                transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(100)) },
-                                label = "plusToggle",
-                            ) { expanded ->
-                                Text(
-                                    if (expanded) "×" else "+",
-                                    style = OcType.title,
-                                    color = c.ink4,
+                            // + / × toggle — pinned to left, always 44×44
+                            Box(
+                                Modifier
+                                    .size(44.dp)
+                                    .pressable(enabled = !isSending) {
+                                        showAttachMenu = !showAttachMenu
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                val rotation by animateFloatAsState(
+                                    targetValue = if (showAttachMenu) 45f else 0f,
+                                    animationSpec = tween(animMs),
+                                    label = "plusRotation",
                                 )
+                                Text(
+                                    "+",
+                                    style = OcType.body.copy(fontSize = 20.sp, color = c.ink4),
+                                    modifier = Modifier.graphicsLayer {
+                                        rotationZ = rotation
+                                        translationY = -7f
+                                    },
+                                )
+                            }
+                            // Icon buttons — slide out to the right of + (start at x=44dp)
+                            if (showAttachMenu) {
+                                Row(
+                                    Modifier.padding(start = 44.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .size(30.dp)
+                                            .pressable(enabled = !isSending) {
+                                                imagePicker.launch("image/*")
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Image,
+                                            contentDescription = "Image",
+                                            tint = c.ink3,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                    Box(
+                                        Modifier
+                                            .size(30.dp)
+                                            .pressable(enabled = !isSending) {
+                                                filePicker.launch("*/*")
+                                            },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.AttachFile,
+                                            contentDescription = "File",
+                                            tint = c.ink3,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(7.dp))
+                                }
                             }
                         }
                     }
@@ -677,32 +697,51 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                             },
                         )
                     }
-                    // Send button
+                    // Send / Stop button — morphs between send arrow and stop square
                     Box(
                         Modifier
                             .size(44.dp)
                             .clip(CircleShape)
                             .background(
-                                if (inputText.isNotBlank() && !isSending) c.signal else c.surface2
+                                if (isSending) c.accent
+                                else if (inputText.isNotBlank()) c.accent
+                                else c.surface2
                             )
                             .pressable(
-                                enabled = inputText.isNotBlank() && !isSending,
+                                enabled = isSending || inputText.isNotBlank(),
                             ) {
-                                if (inputText.isBlank() || isSending) return@pressable
+                                if (isSending) {
+                                    scope.launch {
+                                        val cfg = prefs.config.first()
+                                        val api = OpenCodeApi(cfg)
+                                        api.abort(sessionId)
+                                        api.close()
+                                        isSending = false
+                                        streamingText = ""
+                                    }
+                                    return@pressable
+                                }
+                                if (inputText.isBlank()) return@pressable
                                 val content = inputText
                                 inputText = ""
                                 isSending = true
                                 streamingText = ""
                                 // Build parts: text + attachments
                                 val parts = mutableListOf<PromptPart>()
+                                val myAttachments = attachments.toList()
                                 parts.add(PromptPart(type = "text", text = content))
-                                attachments.forEach { att ->
+                                myAttachments.forEach { att ->
                                     parts.add(PromptPart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
                                 }
                                 attachments = emptyList()
+                                val msgParts = mutableListOf<MessagePart>()
+                                if (content.isNotBlank()) msgParts.add(MessagePart(type = "text", text = content))
+                                myAttachments.forEach { att ->
+                                    msgParts.add(MessagePart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
+                                }
                                 val userMsg = Message(
                                     info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user"),
-                                    parts = listOf(MessagePart(type = "text", text = content))
+                                    parts = msgParts
                                 )
                                 messages = messages + userMsg
                                 scope.launch {
@@ -718,6 +757,13 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                                                     selectedModel = ModelRef(info.providerID, info.modelID)
                                                 }
                                             }
+                                            // Refresh title if still placeholder
+                                            if (displayTitle == "新会话") {
+                                                api.getSession(sessionId).onSuccess { s ->
+                                                    val t = s.title.substringBefore(" - ").ifBlank { s.slug }
+                                                    if (t.isNotBlank() && t != "new session") displayTitle = t
+                                                }
+                                            }
                                         }
                                         .onFailure {
                                             val api2 = OpenCodeApi(cfg)
@@ -731,7 +777,30 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit) {
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("↑", style = OcType.body.copy(color = if (inputText.isNotBlank() && !isSending) c.accentInk else c.ink4))
+                        val hasContent = inputText.isNotBlank()
+                        AnimatedContent(
+                            targetState = isSending to hasContent,
+                            transitionSpec = {
+                                if (initialState.first != targetState.first) {
+                                    // Icon shape change (↑→■): scale morph
+                                    (scaleIn(tween(100)) + fadeIn(tween(100))) togetherWith
+                                        (scaleOut(tween(100)) + fadeOut(tween(100)))
+                                } else {
+                                    // Color-only change: instant crossfade
+                                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                }
+                            },
+                            label = "sendStop",
+                        ) { (sending, content) ->
+                            val tint = when {
+                                sending || content -> c.accentInk
+                                else -> c.ink4
+                            }
+                            Text(
+                                if (sending) "■" else "↑",
+                                style = OcType.body.copy(color = tint),
+                            )
+                        }
                     }
                 }
             }

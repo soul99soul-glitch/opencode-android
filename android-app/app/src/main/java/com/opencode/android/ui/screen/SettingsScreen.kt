@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import com.opencode.android.data.api.OpenCodeApi
+import com.opencode.android.data.model.AgentInfo
 import com.opencode.android.data.model.ModelRef
 import com.opencode.android.data.model.Provider
 import com.opencode.android.data.repository.AppearanceRepository
@@ -66,15 +67,18 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     val defaultModelProvider by prefs.defaultModelProvider.collectAsState(initial = "")
     val defaultModelId by prefs.defaultModelId.collectAsState(initial = "")
     var providers by remember { mutableStateOf<List<Provider>>(emptyList()) }
+    var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
     var showModelPicker by remember { mutableStateOf(false) }
     var expandedProviderId by remember { mutableStateOf<String?>(null) }
 
-    // Load providers from API
+    // Load providers + agents from API
     LaunchedEffect(Unit) {
         val cfg = prefs.config.first()
         val api = OpenCodeApi(cfg)
         api.fetchConfiguredProviders()
             .onSuccess { providers = it }
+        api.fetchAgents()
+            .onSuccess { all -> availableAgents = all.filter { it.mode == "primary" && !it.hidden } }
         api.close()
     }
 
@@ -201,23 +205,17 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 Modifier
                     .fillMaxWidth()
                     .pressable {
-                        val next = when (defaultAgent) {
-                            "build" -> "plan"
-                            "plan" -> "orchestrator"
-                            else -> "build"
-                        }
-                        scope.launch { prefs.saveDefaultAgent(next) }
+                        if (availableAgents.size < 2) return@pressable
+                        val currentIdx = availableAgents.indexOfFirst { it.name == defaultAgent }
+                        val nextIdx = if (currentIdx >= 0) (currentIdx + 1) % availableAgents.size else 0
+                        scope.launch { prefs.saveDefaultAgent(availableAgents[nextIdx].name) }
                     }
                     .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Default Agent", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
                 Text(
-                    when (defaultAgent) {
-                        "plan" -> "Plan"
-                        "orchestrator" -> "Orch"
-                        else -> "Build"
-                    },
+                    defaultAgent.replaceFirstChar { it.uppercase() },
                     style = OcType.mono,
                     color = c.ink2,
                 )

@@ -1,16 +1,20 @@
 package com.opencode.android.ui.screen
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -20,7 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,9 +56,23 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     var sessionPreviews by remember { mutableStateOf<Map<String, Pair<String?, Int>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showNewDialog by remember { mutableStateOf(false) }
     var isCreating by remember { mutableStateOf(false) }
     var hostPort by remember { mutableStateOf("127.0.0.1:4096") }
+
+    suspend fun createNewSession() {
+        if (isCreating) return
+        isCreating = true
+        val cfg = prefs.config.first()
+        val api = OpenCodeApi(cfg)
+        api.createSession()
+            .onSuccess { session ->
+                val t = session.title.substringBefore(" - ").ifBlank { session.slug }
+                onSessionClick(session.id, t)
+            }
+            .onFailure { error = it.message }
+        api.close()
+        isCreating = false
+    }
 
     fun refresh() {
         scope.launch {
@@ -158,20 +179,91 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                     }
                 }
                 sessions.isEmpty() -> EmptySessionsState {
-                    showNewDialog = true
+                    scope.launch { createNewSession() }
                 }
                 else -> {
+                    val deleteWidth = 72.dp
+                    val deleteWidthPx = with(LocalDensity.current) { deleteWidth.toPx() }
                     LazyColumn(Modifier.fillMaxSize()) {
-                        items(sessions, key = { it.id }) { session ->
+                        items(
+                            items = sessions,
+                            key = { it.id },
+                        ) { session ->
                             val isActive = session.id == sessions.firstOrNull()?.id
                             val (preview, msgCount) = sessionPreviews[session.id] ?: (null to 0)
-                            SessionRow(
-                                session,
-                                active = isActive,
-                                preview = preview,
-                                messageCount = msgCount,
-                            ) { onSessionClick(session.id, session.title) }
-                            Hairline()
+                            val animModifier = Modifier.animateItem(
+                                fadeInSpec = null,
+                                fadeOutSpec = null,
+                            )
+                            // Per-item swipe state
+                            var swipeOffset by remember(session.id) { mutableFloatStateOf(0f) }
+                            val animatedOffset by animateDpAsState(
+                                targetValue = with(LocalDensity.current) { swipeOffset.toDp() },
+                                animationSpec = tween(200),
+                                label = "swipe",
+                            )
+                            Box(
+                                Modifier
+                                    .then(animModifier)
+                                    .fillMaxWidth()
+                                    .height(IntrinsicSize.Min)
+                            ) {
+                                // Red delete square — pinned right, fills row height
+                                Box(
+                                    Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .fillMaxHeight()
+                                        .width(deleteWidth)
+                                        .background(Color(0xFFE53935))
+                                        .pressable {
+                                            scope.launch {
+                                                val cfg = prefs.config.first()
+                                                val api = OpenCodeApi(cfg)
+                                                api.deleteSession(session.id)
+                                                api.close()
+                                                sessions = sessions.filter { it.id != session.id }
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Delete",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                                // Session content — slides left, fully covers delete button at rest
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .offset(x = animatedOffset)
+                                        .background(c.bg)
+                                        .pointerInput(session.id) {
+                                            detectHorizontalDragGestures(
+                                                onDragEnd = {
+                                                    swipeOffset = if (swipeOffset < -deleteWidthPx * 0.5f)
+                                                        -deleteWidthPx else 0f
+                                                },
+                                                onHorizontalDrag = { _, dragAmount ->
+                                                    val newOffset = swipeOffset + dragAmount
+                                                    swipeOffset = newOffset.coerceIn(-deleteWidthPx, 0f)
+                                                },
+                                            )
+                                        }
+                                ) {
+                                    SessionRow(
+                                        session,
+                                        active = isActive,
+                                        preview = preview,
+                                        messageCount = msgCount,
+                                    ) {
+                                        swipeOffset = 0f
+                                        onSessionClick(session.id, session.title.substringBefore(" - ").ifBlank { session.slug })
+                                    }
+                                    Hairline()
+                                }
+                            }
                         }
                     }
                 }
@@ -197,73 +289,12 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
             ) {
                 Box(
                     Modifier
-                        .pressable { showNewDialog = true }
+                        .pressable { scope.launch { createNewSession() } }
                         .background(c.accent, OcButtonShape)
                         .padding(horizontal = 20.dp, vertical = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("+ New session", style = OcType.body.copy(color = c.accentInk, fontWeight = FontWeight.SemiBold))
-                }
-            }
-        }
-    }
-
-    // ── New session dialog ──
-    if (showNewDialog) {
-        var title by remember { mutableStateOf("") }
-        Box(
-            Modifier.fillMaxSize().background(c.bg.copy(alpha = 0.85f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                Modifier.padding(28.dp).fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("New Session", style = OcType.titleL.copy(fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold), color = c.ink)
-                Spacer(Modifier.height(20.dp))
-                UnderlineField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = "Title",
-                    leading = { Text("✎", color = c.ink3) },
-                    placeholder = "Optional",
-                )
-                Spacer(Modifier.height(24.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Box(
-                        Modifier.weight(1f).pressable { if (!isCreating) showNewDialog = false }
-                            .background(c.surface2, OcButtonShape).padding(vertical = 14.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("Cancel", style = OcType.body, color = c.ink2)
-                    }
-                    Box(
-                        Modifier.weight(1f).pressable {
-                            if (isCreating) return@pressable
-                            isCreating = true
-                            scope.launch {
-                                val cfg = prefs.config.first()
-                                val api = OpenCodeApi(cfg)
-                                api.createSession(title.ifBlank { null })
-                                    .onSuccess {
-                                        showNewDialog = false
-                                        onSessionClick(it.id, it.title)
-                                    }
-                                api.close()
-                                isCreating = false
-                            }
-                        }.background(c.ink, OcButtonShape).padding(vertical = 14.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (isCreating) {
-                            OnlineDot()
-                        } else {
-                            Text("Create", style = OcType.body, color = c.bg)
-                        }
-                    }
                 }
             }
         }
@@ -313,7 +344,7 @@ private fun SessionRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                session.title,
+                session.title.substringBefore(" - ").ifBlank { session.slug },
                 style = OcType.rowTitle,
                 color = c.ink,
                 maxLines = 1,

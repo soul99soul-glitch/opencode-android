@@ -1,25 +1,35 @@
 package com.opencode.android.ui.component
 
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.compose.animation.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.opencode.android.data.model.Message
 import com.opencode.android.data.model.MessagePart
-import com.opencode.android.ui.component.MarkdownText
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcBubbleShape
-import com.opencode.android.ui.theme.OcType
 import com.opencode.android.ui.theme.OcUserBubbleShape
+import com.opencode.android.ui.theme.OcType
 
 @Composable
 fun MessageBubble(message: Message) {
@@ -34,9 +44,9 @@ fun MessageBubble(message: Message) {
             // User: right-aligned dark bubble with asymmetric corners
             Box(
                 Modifier
-                    .fillMaxWidth(0.88f)
+                    .widthIn(max = 310.dp)
                     .background(c.userBg, OcUserBubbleShape)
-                    .padding(14.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 Column {
@@ -47,10 +57,50 @@ fun MessageBubble(message: Message) {
                                     text = part.text ?: "",
                                     style = OcType.body.copy(color = c.userInk),
                                 )
-                                Spacer(Modifier.height(6.dp))
                             }
-                            else -> { /* skip non-text in user bubbles */ }
+                            "file", "image" -> {
+                                // Show thumb for images with data URI
+                                val isImage = part.mime?.startsWith("image/") == true
+                                if (isImage) {
+                                    val img = try {
+                                        val dataUri = part.url ?: part.text ?: ""
+                                        val base64Data = dataUri.substringAfter("base64,")
+                                        if (base64Data.isNotEmpty()) {
+                                            val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+                                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                        } else null
+                                    } catch (_: Exception) { null }
+                                    if (img != null) {
+                                        Row(
+                                            Modifier.padding(top = 4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Image(img, "attached image",
+                                                Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
+                                                contentScale = ContentScale.Crop)
+                                            if (part.filename != null) {
+                                                Text(part.filename, style = OcType.mono.copy(fontSize = 10.sp, color = c.userInk))
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // File indicator
+                                    Row(
+                                        Modifier.padding(top = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(Icons.Outlined.AttachFile, "file",
+                                            tint = c.userInk.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(14.dp))
+                                        Text(part.filename ?: "file", style = OcType.mono.copy(fontSize = 10.sp, color = c.userInk))
+                                    }
+                                }
+                            }
+                            else -> { /* skip */ }
                         }
+                        Spacer(Modifier.height(6.dp))
                     }
                 }
             }

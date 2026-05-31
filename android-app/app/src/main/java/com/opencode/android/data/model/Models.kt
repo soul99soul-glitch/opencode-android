@@ -21,6 +21,7 @@ data class HealthResponse(
 data class Session(
     val id: String,
     val title: String = "Untitled",
+    val slug: String = "new session",
     val directory: String? = null,
     val version: String? = null,
     val time: SessionTime? = null,
@@ -88,6 +89,9 @@ data class MessageTime(
 data class MessagePart(
     val type: String,
     val text: String? = null,
+    val mime: String? = null,
+    val url: String? = null,
+    val filename: String? = null,
     val id: String? = null,
     val sessionID: String? = null,
     val messageID: String? = null,
@@ -133,4 +137,13 @@ data class ModelInfo(
     val id: String = "",
     val providerID: String = "",
     val name: String = "",
+)
+
+/* Agent discovery */
+
+@Serializable
+data class AgentInfo(
+    val name: String,
+    val mode: String = "primary",
+    val hidden: Boolean = false,
 )
