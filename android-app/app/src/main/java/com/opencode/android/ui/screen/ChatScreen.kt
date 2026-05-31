@@ -946,18 +946,38 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     return@pressable
                                 }
                                 if (rawText.isBlank()) return@pressable
-                                // Use parsed text + agent when @agent or /command detected
+                                // Send logic: orchestrator recognizes @agent prefix in text and
+                                // dispatches subagents via task tool (producing capsules).
+                                // Agent param in API = inline mode switch (no capsule) — avoid.
                                 val sendText: String
-                                val sendAgent: String?
+                                val sendAgent: String  // API agent (always orchestrator for @cmd)
+                                val displayAgent: String? // UI tag shown on user bubble
                                 if (parsedInput != null) {
-                                    // For skills: only treat as skill if not a mapped command AND skill name is known
-                                    val isSkill = !parsedInput.third && parsedAgent == null &&
-                                        skills.any { it.name.equals(parsedInput.first, ignoreCase = true) }
-                                    sendText = if (isSkill) rawText else (parsedRest ?: "")
-                                    sendAgent = parsedAgent ?: selectedAgent ?: "orchestrator"
+                                    val (name, rest, isAgent) = parsedInput
+                                    if (isAgent) {
+                                        // @agent: keep full text for orchestrator recognition
+                                        sendText = rawText
+                                        sendAgent = selectedAgent ?: "orchestrator"
+                                        displayAgent = name
+                                    } else {
+                                        val mapped = parsedAgent
+                                        if (mapped != null) {
+                                            // /command → convert to @agent syntax recognized by orchestrator
+                                            sendText = "@$mapped ${rest ?: ""}".trim()
+                                            sendAgent = selectedAgent ?: "orchestrator"
+                                            displayAgent = mapped
+                                        } else {
+                                            // /skillname → send raw text for server skill handling
+                                            val isSkill = skills.any { it.name.equals(name, ignoreCase = true) }
+                                            sendText = rawText
+                                            sendAgent = selectedAgent ?: "orchestrator"
+                                            displayAgent = null
+                                        }
+                                    }
                                 } else {
                                     sendText = rawText
                                     sendAgent = selectedAgent ?: "orchestrator"
+                                    displayAgent = null
                                 }
                                 if (sendText.isBlank()) return@pressable
                                 inputText = TextFieldValue("")
@@ -977,7 +997,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     msgParts.add(MessagePart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
                                 }
                                 val userMsg = Message(
-                                    info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user", agent = sendAgent),
+                                    info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user", agent = displayAgent),
                                     parts = msgParts
                                 )
                                 messages = messages + userMsg
