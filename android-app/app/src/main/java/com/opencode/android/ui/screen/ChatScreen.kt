@@ -3,6 +3,8 @@ package com.opencode.android.ui.screen
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -13,7 +15,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.AnimatedVisibility
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
@@ -25,7 +26,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -648,8 +648,82 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                     }
                 }
 
+                // ── @agent / /command selector panel ──
+                val showCmdPanel = !isSending && inputText.trimStart().let {
+                    (it.startsWith("@") || it.startsWith("/")) && it.length <= 20 &&
+                        !it.contains(" ") // Hide panel once user types space (committed to choice)
+                }
+                AnimatedVisibility(
+                    visible = showCmdPanel,
+                    enter = fadeIn(tween(120)) + expandVertically(tween(120)),
+                    exit = fadeOut(tween(100)) + shrinkVertically(tween(100)),
+                ) {
+                    val isAgentPanel = inputText.trimStart().startsWith("@")
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(c.raised)
+                            .border(1.dp, c.line, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                    ) {
+                        Text(
+                            if (isAgentPanel) "SUBTASK" else "COMMANDS",
+                            style = OcType.mono.copy(fontSize = 10.sp),
+                            color = c.ink4,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        if (isAgentPanel) {
+                            // ── @ agent panel: show available agents ──
+                            if (availableAgents.isEmpty()) {
+                                Text("Loading agents…", style = OcType.mono.copy(fontSize = 12.sp), color = c.ink4)
+                            } else {
+                                availableAgents.forEach { ag ->
+                                    val short = shortAgent(ag.name)
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .pressable { inputText = "@${ag.name} " }
+                                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        Text("@$short", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
+                                        Text(ag.name, style = OcType.mono.copy(fontSize = 12.sp), color = c.ink2)
+                                    }
+                                }
+                            }
+                        } else {
+                            // ── / command panel: show available commands ──
+                            val slashCommands = listOf(
+                                "review" to "Code review",
+                                "fix" to "Fix bugs",
+                                "find" to "Search codebase",
+                                "explain" to "Explain code",
+                                "plan" to "Create plan",
+                            )
+                            slashCommands.forEach { (cmd, desc) ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .pressable { inputText = "/$cmd " }
+                                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Text("/$cmd", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
+                                    Text(desc, style = OcType.mono.copy(fontSize = 12.sp), color = c.ink2)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // ── @agent / /command indicator pill ──
-                if (parsedInput != null && parsedAgent != null) {
+                if (parsedInput != null && parsedAgent != null && !showCmdPanel) {
                     val label = if (parsedInput.third) "@${parsedInput.first}" else "/${parsedInput.first}"
                     Row(
                         Modifier
@@ -665,41 +739,6 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             style = OcType.mono.copy(fontSize = 11.sp), color = c.ink3)
                     }
                     Spacer(Modifier.height(4.dp))
-                }
-
-                // ── / command autocomplete dropdown ──
-                AnimatedVisibility(
-                    visible = parsedInput != null && !parsedInput.third && parsedRest.isNullOrBlank(),
-                ) {
-                    val slashCommands = listOf(
-                        "review" to "Code review",
-                        "fix" to "Fix bugs",
-                        "find" to "Search codebase",
-                        "explain" to "Explain code",
-                        "plan" to "Create plan",
-                    )
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 12.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        slashCommands.forEach { (cmd, desc) ->
-                            Box(
-                                Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(c.surface2)
-                                    .pressable { inputText = "/$cmd " }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                            ) {
-                                Column {
-                                    Text("/$cmd", style = OcType.monoStrong.copy(fontSize = 12.sp), color = c.accent)
-                                    Text(desc, style = OcType.mono.copy(fontSize = 9.sp), color = c.ink4)
-                                }
-                            }
-                        }
-                    }
                 }
 
                 // Input bar: [+ expandable] [text field...] [send]
