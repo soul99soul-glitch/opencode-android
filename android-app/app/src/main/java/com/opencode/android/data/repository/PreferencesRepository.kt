@@ -1,0 +1,50 @@
+package com.opencode.android.data.repository
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.preferencesDataStore
+import com.opencode.android.data.model.ServerConfig
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("opencode")
+
+class PreferencesRepository(context: Context) {
+
+    private val appContext = context.applicationContext
+
+    private object Keys {
+        val HOST = stringPreferencesKey("host")
+        val PORT = intPreferencesKey("port")
+        val PASSWORD = stringPreferencesKey("password")
+        val DIRECTORY = stringPreferencesKey("directory")
+        val IS_SETUP_DONE = booleanPreferencesKey("is_setup_done")
+    }
+
+    val config: Flow<ServerConfig> = appContext.dataStore.data.map { prefs ->
+        ServerConfig(
+            host = prefs[Keys.HOST] ?: "127.0.0.1",
+            port = prefs[Keys.PORT] ?: 4096,
+            password = prefs[Keys.PASSWORD] ?: "",
+            directory = prefs[Keys.DIRECTORY] ?: ""
+        )
+    }
+
+    val isSetupDone: Flow<Boolean> = appContext.dataStore.data.map { prefs ->
+        prefs[Keys.IS_SETUP_DONE] ?: false
+    }
+
+    suspend fun saveConfig(config: ServerConfig) {
+        appContext.dataStore.edit { prefs ->
+            prefs[Keys.HOST] = config.host
+            prefs[Keys.PORT] = config.port
+            prefs[Keys.PASSWORD] = config.password
+            prefs[Keys.DIRECTORY] = config.directory
+        }
+    }
+
+    suspend fun setSetupDone(done: Boolean) {
+        appContext.dataStore.edit { it[Keys.IS_SETUP_DONE] = done }
+    }
+}
