@@ -125,7 +125,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
-    var inputText by remember { mutableStateOf("") }
+    var inputText by remember { mutableStateOf(TextFieldValue("")) }
+    val rawText = inputText.text
     var streamingText by remember { mutableStateOf("") }
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
@@ -138,8 +139,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var subtaskWorkerSid by remember { mutableStateOf<String?>(null) }
 
     // Parse @agent or /command prefix from input
-    val parsedInput = remember(inputText) {
-        val trimmed = inputText.trimStart()
+    val parsedInput = remember(rawText) {
+        val trimmed = rawText.trimStart()
         when {
             // @agentname at start: "@oracle review this" → agent=oracle, text="review this"
             trimmed.startsWith("@") -> {
@@ -504,7 +505,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                         }
                     }
                     messages.isEmpty() && streamingText.isEmpty() && !isSending -> {
-                        EmptyChatState { inputText = it }
+                        EmptyChatState { inputText = TextFieldValue(it) }
                     }
                     else -> {
                         LazyColumn(
@@ -654,7 +655,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 }
 
                 // ── @agent / /command selector panel ──
-                val showCmdPanel = !isSending && inputText.trimStart().let {
+                val showCmdPanel = !isSending && rawText.trimStart().let {
                     (it.startsWith("@") || it.startsWith("/")) && it.length <= 20 &&
                         !it.contains(" ") // Hide panel once user types space (committed to choice)
                 }
@@ -663,7 +664,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                     enter = fadeIn(tween(120)) + expandVertically(tween(120)),
                     exit = fadeOut(tween(100)) + shrinkVertically(tween(100)),
                 ) {
-                    val isAgentPanel = inputText.trimStart().startsWith("@")
+                    val isAgentPanel = rawText.trimStart().startsWith("@")
                     Column(
                         Modifier
                             .fillMaxWidth()
@@ -671,7 +672,9 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             .clip(RoundedCornerShape(12.dp))
                             .background(c.raised)
                             .border(1.dp, c.line, RoundedCornerShape(12.dp))
-                            .padding(12.dp),
+                            .padding(12.dp)
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
                     ) {
                         Text(
                             if (isAgentPanel) "SUBTASK" else "COMMANDS",
@@ -690,7 +693,10 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(8.dp))
-                                            .pressable { inputText = "@${ag.name} " }
+                                            .pressable {
+                                                val t = "@${ag.name} "
+                                                inputText = TextFieldValue(t, selection = TextRange(t.length))
+                                            }
                                             .padding(horizontal = 12.dp, vertical = 9.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -701,7 +707,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             }
                         } else {
                             // ── / command panel: show real skills + mapped commands ──
-                            val typed = inputText.trimStart().removePrefix("/").trim()
+                            val typed = rawText.trimStart().removePrefix("/").trim()
                             // Mapped agent commands (these route to specific subagents)
                             val agentCommands = listOf(
                                 "review" to "Code review",
@@ -728,7 +734,10 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
-                                        .pressable { inputText = "/$cmd " }
+                                        .pressable {
+                                            val t = "/$cmd "
+                                            inputText = TextFieldValue(t, selection = TextRange(t.length))
+                                        }
                                         .padding(horizontal = 12.dp, vertical = 9.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -756,7 +765,10 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(8.dp))
-                                            .pressable { inputText = "/${skill.name} " }
+                                            .pressable {
+                                                val t = "/${skill.name} "
+                                                inputText = TextFieldValue(t, selection = TextRange(t.length))
+                                            }
                                             .padding(horizontal = 12.dp, vertical = 9.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -898,7 +910,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             enabled = !isSending,
                             cursorBrush = SolidColor(c.accent),
                             decorationBox = { inner ->
-                                if (inputText.isEmpty()) {
+                                if (inputText.text.isEmpty()) {
                                     Text("Ask opencode…", style = OcType.body, color = c.ink4)
                                 }
                                 inner()
@@ -910,13 +922,13 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                         Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(
+                                .background(
                                 if (isSending) c.accent
-                                else if (inputText.isNotBlank()) c.accent
+                                else if (rawText.isNotBlank()) c.accent
                                 else c.surface2
                             )
                             .pressable(
-                                enabled = isSending || inputText.isNotBlank(),
+                                enabled = isSending || rawText.isNotBlank(),
                             ) {
                                 if (isSending) {
                                     scope.launch {
@@ -929,19 +941,21 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     }
                                     return@pressable
                                 }
-                                if (inputText.isBlank()) return@pressable
+                                if (rawText.isBlank()) return@pressable
                                 // Use parsed text + agent when @agent or /command detected
                                 val sendText: String
                                 val sendAgent: String?
                                 if (parsedInput != null) {
-                                    sendText = parsedRest ?: ""  // Strip prefix, never send @agent
+                                    // For skills (no mapped agent), send full text including /skillname
+                                    val isSkill = !parsedInput.third && parsedAgent == null
+                                    sendText = if (isSkill) rawText else (parsedRest ?: "")
                                     sendAgent = parsedAgent ?: selectedAgent
                                 } else {
-                                    sendText = inputText
+                                    sendText = rawText
                                     sendAgent = selectedAgent
                                 }
                                 if (sendText.isBlank()) return@pressable
-                                inputText = ""
+                                inputText = TextFieldValue("")
                                 isSending = true
                                 streamingText = ""
                                 // Build parts: text + attachments
@@ -998,7 +1012,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        val hasContent = inputText.isNotBlank()
+                        val hasContent = inputText.text.isNotBlank()
                         AnimatedContent(
                             targetState = isSending to hasContent,
                             transitionSpec = {
