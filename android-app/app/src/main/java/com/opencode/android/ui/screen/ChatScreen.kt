@@ -676,8 +676,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             .clip(RoundedCornerShape(12.dp))
                             .background(c.raised)
                             .border(1.dp, c.line, RoundedCornerShape(12.dp))
-                            .padding(12.dp)
-                            .heightIn(max = 320.dp)
+                            .padding(8.dp)
+                                .heightIn(max = 200.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
                         Text(
@@ -701,11 +701,11 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                                 val t = "@${ag.name} "
                                                 inputText = TextFieldValue(t, selection = TextRange(t.length))
                                             }
-                                            .padding(horizontal = 12.dp, vertical = 9.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    ) {
-                                        Text("@${ag.name}", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Text("@${ag.name}", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
                                     }
                                 }
                             }
@@ -742,7 +742,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                             val t = "/$cmd "
                                             inputText = TextFieldValue(t, selection = TextRange(t.length))
                                         }
-                                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
@@ -773,12 +773,12 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                                 val t = "/${skill.name} "
                                                 inputText = TextFieldValue(t, selection = TextRange(t.length))
                                             }
-                                            .padding(horizontal = 12.dp, vertical = 9.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    ) {
-                                        Text("/${skill.name}", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
-                                        Text(skill.description.take(50), style = OcType.mono.copy(fontSize = 11.sp),
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Text("/${skill.name}", style = OcType.monoStrong.copy(fontSize = 13.sp), color = c.accent)
+                                    Text(skill.description.take(50), style = OcType.mono.copy(fontSize = 11.sp),
                                             color = c.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
