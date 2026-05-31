@@ -73,10 +73,10 @@ data class Message(
 data class MessageInfo(
     val id: String,
     val role: String,
-    val agent: String? = null,
-    val modelID: String? = null,
+    val sessionID: String? = null,
     val providerID: String? = null,
-    val time: MessageTime? = null
+    val modelID: String? = null,
+    val agent: String? = null
 )
 
 @Serializable

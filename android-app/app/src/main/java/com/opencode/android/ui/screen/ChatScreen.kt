@@ -977,7 +977,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     msgParts.add(MessagePart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
                                 }
                                 val userMsg = Message(
-                                    info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user"),
+                                    info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user", agent = sendAgent),
                                     parts = msgParts
                                 )
                                 messages = messages + userMsg

@@ -50,6 +50,17 @@ fun MessageBubble(
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
         if (isUser) {
+            // ── Agent tag (shown when sent to a specific subagent) ──
+            val agentTag = message.info.agent?.takeIf { it != "orchestrator" && it != "build" && it != "plan" }
+            if (agentTag != null) {
+                Text(
+                    "→ @$agentTag",
+                    style = OcType.mono.copy(fontSize = 11.sp),
+                    color = c.accent,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+
             // ── Text bubble (dark, right-aligned) ──
             if (textParts.isNotEmpty()) {
                 Box(
@@ -118,13 +129,19 @@ fun MessageBubble(
         } else {
             // Assistant: ZERO decoration — no background, no bubble, just content
             Column(Modifier.fillMaxWidth(0.92f)) {
-                // Signature line
+                // Signature line — shows agent name when routed to subagent
+                val agentName = message.info.agent
+                val isSub = agentName != null && agentName != "orchestrator"
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
                     Text("</>", style = OcType.mono.copy(fontSize = OcType.mono.fontSize), color = c.accent)
-                    Text("opencode", style = OcType.monoStrong, color = c.ink3)
+                    Text(
+                        if (isSub) "@$agentName" else "opencode",
+                        style = OcType.monoStrong,
+                        color = if (isSub) c.accent else c.ink3,
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
 
