@@ -994,40 +994,45 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     return@pressable
                                 }
                                 if (rawText.isBlank()) return@pressable
-                                // Send logic: orchestrator recognizes @agent prefix in text and
-                                // dispatches subagents via task tool (producing capsules).
-                                // Agent param in API = inline mode switch (no capsule) — avoid.
-                                val sendText: String
-                                val sendAgent: String  // API agent (always orchestrator for @cmd)
+                                // Send logic with forced delegation:
+                                // - bubbleText: original user text for the message bubble
+                                // - sendText: "Delegate...using task tool" — forces task capsule on server
+                                val bubbleText: String   // text shown in user message bubble
+                                val sendText: String      // text sent to server
+                                val sendAgent: String     // API agent (always orchestrator for @cmd)
                                 val displayAgent: String? // UI tag shown on user bubble
                                 if (parsedInput != null) {
                                     val (name, rest, isAgent) = parsedInput
                                     if (isAgent) {
-                                        // @agent: keep full text for orchestrator recognition
-                                        sendText = rawText
+                                        // Force delegation to subagent via task tool
+                                        sendText = "Delegate to @$name subagent using task tool: ${rest ?: ""}".trim()
+                                        bubbleText = rawText
                                         sendAgent = selectedAgent ?: "orchestrator"
                                         displayAgent = name
                                     } else {
                                         val mapped = parsedAgent
                                         if (mapped != null) {
-                                            // /command → convert to @agent syntax recognized by orchestrator
-                                            sendText = "@$mapped ${rest ?: ""}".trim()
+                                            // /command → force delegation to mapped agent
+                                            sendText = "Delegate to @$mapped subagent using task tool: ${rest ?: ""}".trim()
+                                            bubbleText = rawText
                                             sendAgent = selectedAgent ?: "orchestrator"
                                             displayAgent = mapped
                                         } else {
                                             // /skillname → send raw text for server skill handling
                                             val isSkill = skills.any { it.name.equals(name, ignoreCase = true) }
                                             sendText = rawText
+                                            bubbleText = rawText
                                             sendAgent = selectedAgent ?: "orchestrator"
                                             displayAgent = null
                                         }
                                     }
                                 } else {
                                     sendText = rawText
+                                    bubbleText = rawText
                                     sendAgent = selectedAgent ?: "orchestrator"
                                     displayAgent = null
                                 }
-                                if (sendText.isBlank()) return@pressable
+                                if (bubbleText.isBlank()) return@pressable
                                 inputText = TextFieldValue("")
                                 isSending = true
                                 streamingText = ""
@@ -1040,7 +1045,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 }
                                 attachments = emptyList()
                                 val msgParts = mutableListOf<MessagePart>()
-                                if (sendText.isNotBlank()) msgParts.add(MessagePart(type = "text", text = sendText))
+                                if (bubbleText.isNotBlank()) msgParts.add(MessagePart(type = "text", text = bubbleText))
                                 myAttachments.forEach { att ->
                                     msgParts.add(MessagePart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
                                 }
