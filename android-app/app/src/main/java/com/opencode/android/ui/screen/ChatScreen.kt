@@ -128,18 +128,9 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var isSending by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val rawText = inputText.text
-    var streamingText by remember { mutableStateOf("") }
-    var sseBuffer by remember { mutableStateOf("") }
-    // Throttled SSE delta flush — prevents per-character recomposition
-    LaunchedEffect(sessionId) {
-        while (true) {
-            delay(120)
-            val buf = sseBuffer
-            if (buf.isNotEmpty() && buf != streamingText) {
-                streamingText = buf
-            }
-        }
-    }
+    val sseBuffer = remember(sessionId) { StringBuilder() }
+    val flushedSseText = remember(sessionId) { StringBuilder() }
+    val activeAssistantText = remember(sessionId) { mutableStateOf("") }
     val reversedMessages by remember { derivedStateOf { messages.asReversed() } }
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
@@ -150,6 +141,16 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
     var showAttachMenu by remember { mutableStateOf(false) }
     var subtaskWorkerSid by remember { mutableStateOf<String?>(null) }
+    var activeLocalUserId by remember { mutableStateOf<String?>(null) }
+    var activeLocalAssistantId by remember { mutableStateOf<String?>(null) }
+    var activeUserBubbleText by remember { mutableStateOf<String?>(null) }
+    var activeSendText by remember { mutableStateOf<String?>(null) }
+    val consumedServerMessageIds = remember { mutableSetOf<String>() }
+    var providers by remember { mutableStateOf<List<Provider>>(emptyList()) }
+    var showModelPicker by remember { mutableStateOf(false) }
+    var expandedProviderId by remember { mutableStateOf<String?>(null) }
+    var selectedModel by remember { mutableStateOf<ModelRef?>(null) }
+    val listState = rememberLazyListState()
 
     // Parse @agent or /command prefix from input
     val parsedInput = remember(rawText) {
@@ -194,6 +195,155 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     }
     val parsedRest = parsedInput?.second?.ifBlank { null }
 
+    fun resetStreamBuffers(clearActiveText: Boolean = true) {
+        sseBuffer.clear()
+        flushedSseText.clear()
+        if (clearActiveText) {
+            activeAssistantText.value = ""
+        }
+    }
+
+    fun markSseTextFlushed(text: String) {
+        flushedSseText.clear()
+        flushedSseText.append(text)
+    }
+
+    fun Message.firstText(): String? = parts.firstOrNull { it.type == "text" }?.text
+
+    fun Message.withTextPart(text: String): Message {
+        val textIndex = parts.indexOfFirst { it.type == "text" }
+        val updatedParts = if (textIndex >= 0) {
+            parts.mapIndexed { index, part ->
+                if (index == textIndex) part.copy(text = text) else part
+            }
+        } else {
+            listOf(MessagePart(type = "text", text = text)) + parts
+        }
+        return copy(parts = updatedParts)
+    }
+
+    fun replaceMessageById(id: String?, replacement: Message): Boolean {
+        if (id == null) return false
+        val idx = messages.indexOfFirst { it.info.id == id }
+        if (idx < 0) return false
+        messages[idx] = replacement
+        return true
+    }
+
+    fun updateActiveAssistantText(text: String) {
+        val localId = activeLocalAssistantId ?: return
+        val idx = messages.indexOfFirst { it.info.id == localId }
+        if (idx >= 0) {
+            messages[idx] = messages[idx].withTextPart(text)
+        }
+    }
+
+    fun mergeServerAssistantIntoLocal(serverMsg: Message): Boolean {
+        val localId = activeLocalAssistantId ?: return false
+        consumedServerMessageIds += serverMsg.info.id
+        return replaceMessageById(localId, serverMsg.copy(info = serverMsg.info.copy(id = localId)))
+    }
+
+    fun isDuplicateOfActiveUser(serverMsg: Message): Boolean {
+        if (serverMsg.info.role != "user") return false
+        val text = serverMsg.firstText() ?: return false
+        return text == activeUserBubbleText || text == activeSendText || text.startsWith("Delegate to @")
+    }
+
+    fun Message.hasVisibleContent(): Boolean {
+        return parts.any { part ->
+            when (part.type) {
+                "text", "reasoning" -> !part.text.isNullOrBlank()
+                "file", "image", "tool", "tool-invocation", "tool-result" -> true
+                else -> false
+            }
+        }
+    }
+
+    fun removeInvisibleNonActiveMessages() {
+        messages.removeAll { msg ->
+            msg.info.id != activeLocalUserId &&
+                msg.info.id != activeLocalAssistantId &&
+                !msg.hasVisibleContent()
+        }
+    }
+
+    fun reconcileServerMessages(serverMsgs: List<Message>) {
+        removeInvisibleNonActiveMessages()
+
+        val existingServerIds = messages
+            .filterNot { it.info.id.startsWith("local_") }
+            .map { it.info.id }
+            .toSet()
+
+        val serverUser = serverMsgs.lastOrNull { isDuplicateOfActiveUser(it) }
+        val serverAssistant = serverMsgs.lastOrNull {
+            it.info.role == "assistant" &&
+                it.info.id !in existingServerIds &&
+                it.info.id !in consumedServerMessageIds &&
+                it.hasVisibleContent()
+        }
+
+        if (serverAssistant != null && mergeServerAssistantIntoLocal(serverAssistant)) {
+            serverAssistant.info.let { info ->
+                if (info.providerID != null && info.modelID != null) {
+                    selectedModel = ModelRef(info.providerID, info.modelID)
+                }
+            }
+        }
+
+        if (serverUser != null) {
+            consumedServerMessageIds += serverUser.info.id
+            val localUserId = activeLocalUserId
+            val localIdx = messages.indexOfFirst { it.info.id == localUserId }
+            if (localIdx >= 0 && serverUser.firstText() == activeUserBubbleText) {
+                messages[localIdx] = serverUser
+            }
+        }
+
+        val currentIds = messages.map { it.info.id }.toSet()
+        val activeLocalUserStillVisible = activeLocalUserId?.let { id ->
+            messages.any { it.info.id == id }
+        } == true
+        serverMsgs
+            .filter { it.info.id !in currentIds }
+            .filter { it.info.id !in consumedServerMessageIds }
+            .filter { it.hasVisibleContent() }
+            .filterNot { activeLocalUserStillVisible && isDuplicateOfActiveUser(it) }
+            .forEach { messages.add(it) }
+    }
+
+    suspend fun syncServerMessagesAfterIdle() {
+        delay(800)
+        val cfg = prefs.config.first()
+        val api = OpenCodeApi(cfg)
+        api.getMessages(sessionId).onSuccess { serverMsgs ->
+            reconcileServerMessages(serverMsgs)
+        }
+        api.close()
+        activeLocalUserId = null
+        activeLocalAssistantId = null
+        activeUserBubbleText = null
+        activeSendText = null
+        removeInvisibleNonActiveMessages()
+        resetStreamBuffers(clearActiveText = false)
+    }
+
+    // Throttled SSE delta flush — updates the in-list assistant item, not a separate bubble.
+    LaunchedEffect(sessionId) {
+        while (true) {
+            delay(100)
+            val buf = sseBuffer.toString()
+            if (buf.isNotEmpty() && buf != flushedSseText.toString()) {
+                markSseTextFlushed(buf)
+                activeAssistantText.value = buf
+                if (listState.firstVisibleItemIndex == 0 && listState.layoutInfo.totalItemsCount > 0) {
+                    listState.scrollToItem(0)
+                }
+            }
+        }
+    }
+
     // Helper to process picked URIs
     fun processUris(uris: List<Uri>) {
         uris.forEach { uri ->
@@ -221,16 +371,9 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         ActivityResultContracts.GetMultipleContents()
     ) { uris -> processUris(uris); showAttachMenu = false }
 
-    // Provider/model picker state
-    var providers by remember { mutableStateOf<List<Provider>>(emptyList()) }
-    var showModelPicker by remember { mutableStateOf(false) }
-    var expandedProviderId by remember { mutableStateOf<String?>(null) }
-    var selectedModel by remember { mutableStateOf<ModelRef?>(null) }
-
     // Detect current agent from messages
     val currentAgent = messages.firstOrNull()?.info?.agent
 
-    val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Show error as snackbar, auto-dismiss
@@ -248,7 +391,11 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         api.getMessages(sessionId)
             .onSuccess { msgs ->
                 messages.clear()
-                messages.addAll(msgs.takeLast(50))
+                messages.addAll(
+                    msgs
+                        .filter { it.hasVisibleContent() }
+                        .takeLast(50)
+                )
                 // Extract model from last assistant message (syncs with desktop/other clients)
                 msgs.lastOrNull { it.info.role == "assistant" }?.info?.let { info ->
                     if (info.providerID != null && info.modelID != null) {
@@ -305,26 +452,16 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 if (evtSid.isBlank() || evtSid != sessionId) return@collect
                 when (type) {
                     "message.part.delta" -> {
-                        sseBuffer += props?.get("delta")?.jsonPrimitive?.content ?: ""
+                        sseBuffer.append(props?.get("delta")?.jsonPrimitive?.content ?: "")
                     }
                     "session.status" -> {
                         val status = props?.get("status")?.jsonObject?.get("type")?.jsonPrimitive?.content
                         if (status == "idle" || status == "completed") {
                             isSending = false
-                            sseBuffer = ""
-                            streamingText = ""
-                                scope.launch {
-                                    val cfg = prefs.config.first()
-                                    val api = OpenCodeApi(cfg)
-                                    api.getMessages(sessionId).onSuccess { serverMsgs ->
-                                        val currentIds = messages.map { it.info.id }.toSet()
-                                        serverMsgs.filter { it.info.id !in currentIds }
-                                            .forEach { messages.add(it) }
-                                    }
-                                    api.close()
-                                }
-                            streamingText = ""
-                                sseBuffer = ""
+                            if (sseBuffer.isNotEmpty()) {
+                                updateActiveAssistantText(sseBuffer.toString())
+                            }
+                            scope.launch { syncServerMessagesAfterIdle() }
                         }
                     }
                 }
@@ -346,36 +483,18 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val api = OpenCodeApi(cfg)
                 val result = api.getMessages(sessionId)
                 result.onSuccess { serverMsgs ->
-                    val localTexts = mutableSetOf<String>()
-                    for (m in messages) {
-                        if (m.info.id.startsWith("local_") && m.info.role == "user") {
-                            for (part in m.parts) {
-                                if (part.type == "text" && part.text != null) localTexts.add(part.text)
-                            }
-                        }
-                    }
-                    val localMsgs = messages.filter { it.info.id.startsWith("local_") }
-                    val serverOnly = serverMsgs.filter { msg ->
-                        !msg.info.id.startsWith("local_") && !(msg.info.role == "user" &&
-                            msg.parts.any { part -> part.type == "text" &&
-                                (part.text?.startsWith("Delegate to @") == true ||
-                                 part.text in localTexts) })
-                    }
-                    // Check if server messages changed (by IDs + last part count)
-                    val sig = serverOnly.joinToString("|") { it.info.id } + "_" +
-                        (serverOnly.lastOrNull()?.parts?.size ?: 0)
+                    val latestAssistant = serverMsgs.lastOrNull { it.info.role == "assistant" }
+                    val sig = serverMsgs.joinToString("|") { it.info.id } + "_" +
+                        (latestAssistant?.parts?.size ?: 0) + "_" +
+                        latestAssistant?.firstText().orEmpty().length
                     if (sig != lastServerIds) {
-                        // Add only new server messages — never replace the whole list
-                        val currentIds = messages.filter { !it.info.id.startsWith("local_") }.map { it.info.id }.toSet()
-                        val newMsgs = serverOnly.filter { it.info.id !in currentIds }
-                        messages.addAll(newMsgs)
                         lastServerIds = sig
                         lastChangeAt = System.currentTimeMillis()
-                        // Only set streaming text when SSE hasn't provided anything yet
-                        if (streamingText.isEmpty()) {
-                            val text = serverOnly.lastOrNull { it.info.role == "assistant" }
-                                ?.parts?.lastOrNull { it.type == "text" }?.text.orEmpty()
-                            if (text.isNotEmpty()) streamingText = text
+                        if (flushedSseText.isEmpty()) {
+                            latestAssistant?.firstText()?.takeIf { it.isNotBlank() }?.let { text ->
+                                markSseTextFlushed(text)
+                                activeAssistantText.value = text
+                            }
                         }
                     }
                 }
@@ -384,15 +503,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             // No change for 20s while sending → assume server is idle
             if (System.currentTimeMillis() - lastChangeAt > 20_000 && isSending) {
                 isSending = false
-                streamingText = ""
-                                sseBuffer = ""
+                scope.launch { syncServerMessagesAfterIdle() }
             }
         }
     }
 
-    // Auto-scroll on new messages/streaming — reversed layout: index 0 = newest
-    LaunchedEffect(messages.size, streamingText) {
-        if (streamingText.isEmpty() && messages.isEmpty()) return@LaunchedEffect
+    // Auto-scroll on inserted messages — streaming growth scrolls from the throttle loop.
+    LaunchedEffect(messages.size) {
+        if (messages.isEmpty()) return@LaunchedEffect
         kotlinx.coroutines.delay(50)
         if (listState.layoutInfo.totalItemsCount > 0) {
             listState.scrollToItem(0)
@@ -587,7 +705,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             CircularProgressIndicator(color = c.accent, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
                         }
                     }
-                    messages.isEmpty() && streamingText.isEmpty() && !isSending -> {
+                    messages.isEmpty() && !isSending -> {
                         EmptyChatState { inputText = TextFieldValue(it) }
                     }
                     else -> {
@@ -602,6 +720,11 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             items(reversedMessages, key = { it.info.id }) { msg ->
                                 MessageBubble(
                                     msg,
+                                    streamingTextState = if (msg.info.id == activeLocalAssistantId) {
+                                        activeAssistantText
+                                    } else {
+                                        null
+                                    },
                                     onSubagentClick = { sid, _ ->
                                         if (sid.isNotBlank() && sid != sessionId) {
                                             onSubagentNavigate(sid)
@@ -629,20 +752,6 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         }
                                     },
                                 )
-                            }
-                        }
-                        // Streaming / Thinking — OUTSIDE LazyColumn to avoid full-content re-evaluation
-                        if (streamingText.isNotEmpty()) {
-                            StreamingBubble(streamingText)
-                        }
-                        if (isSending && streamingText.isEmpty()) {
-                            Row(
-                                Modifier.padding(start = 28.dp, bottom = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                OnlineDot()
-                                Text("Thinking…", style = OcType.mono, color = c.ink3)
                             }
                         }
                         } // close Column
@@ -1025,8 +1134,13 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         api.abort(sessionId)
                                         api.close()
                                         isSending = false
-                                        streamingText = ""
-                                sseBuffer = ""
+                                        resetStreamBuffers()
+                                        val localAssistantId = activeLocalAssistantId
+                                        val localIdx = messages.indexOfFirst { it.info.id == localAssistantId }
+                                        if (localIdx >= 0 && activeAssistantText.value.isBlank() && messages[localIdx].firstText().isNullOrBlank()) {
+                                            messages.removeAt(localIdx)
+                                        }
+                                        activeLocalAssistantId = null
                                     }
                                     return@pressable
                                 }
@@ -1072,8 +1186,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 if (bubbleText.isBlank()) return@pressable
                                 inputText = TextFieldValue("")
                                 isSending = true
-                                streamingText = ""
-                                sseBuffer = ""
+                                resetStreamBuffers()
                                 // Build parts: text + attachments
                                 val parts = mutableListOf<PromptPart>()
                                 val myAttachments = attachments.toList()
@@ -1087,21 +1200,31 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 myAttachments.forEach { att ->
                                     msgParts.add(MessagePart(type = "file", mime = att.mime, url = att.dataUri, filename = att.filename))
                                 }
+                                val now = System.currentTimeMillis()
                                 val userMsg = Message(
-                                    info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user", agent = displayAgent),
+                                    info = MessageInfo(id = "local_user_$now", role = "user", agent = displayAgent),
                                     parts = msgParts
                                 )
+                                val assistantMsg = Message(
+                                    info = MessageInfo(
+                                        id = "local_assistant_$now",
+                                        role = "assistant",
+                                        sessionID = sessionId,
+                                        agent = sendAgent,
+                                    ),
+                                    parts = listOf(MessagePart(type = "text", text = "")),
+                                )
+                                activeLocalUserId = userMsg.info.id
+                                activeLocalAssistantId = assistantMsg.info.id
+                                activeUserBubbleText = bubbleText
+                                activeSendText = sendText
                                 messages.add(userMsg)
+                                messages.add(assistantMsg)
                                 scope.launch {
                                     val cfg = prefs.config.first()
                                     val api = OpenCodeApi(cfg)
                                     api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
                                         .onSuccess { msg ->
-                                            // Only add assistant messages — user echoes handled by polling
-                                            if (msg.info.role == "assistant" && messages.none { it.info.id == msg.info.id }) {
-                                                messages.add(msg)
-                                            }
-                                            isSending = false
                                             // Update selected model from response
                                             msg.info.let { info ->
                                                 if (info.providerID != null && info.modelID != null) {
@@ -1117,14 +1240,19 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                             }
                                         }
                                         .onFailure {
-                                            val api2 = OpenCodeApi(cfg)
-                                            api2.getMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }
-                                            api2.close()
-                                            val msg = it.message ?: "Unknown error"
-                                            errorMsg = if (msg.contains("No suitable converter") || msg.contains("SerializationException"))
-                                                "Unexpected server response"
-                                            else msg.take(120)
-                                            isSending = false
+                                            if (activeAssistantText.value.isBlank() && sseBuffer.isEmpty()) {
+                                                val localAssistantId = activeLocalAssistantId
+                                                val localIdx = messages.indexOfFirst { item -> item.info.id == localAssistantId }
+                                                if (localIdx >= 0 && messages[localIdx].firstText().isNullOrBlank()) {
+                                                    messages.removeAt(localIdx)
+                                                }
+                                                val msg = it.message ?: "Unknown error"
+                                                errorMsg = if (msg.contains("No suitable converter") || msg.contains("SerializationException"))
+                                                    "Unexpected server response"
+                                                else msg.take(120)
+                                                isSending = false
+                                                resetStreamBuffers()
+                                            }
                                         }
                                     api.close()
                                 }

@@ -36,14 +36,28 @@ import com.opencode.android.ui.theme.OcType
 @Composable
 fun MessageBubble(
     message: Message,
+    streamingTextState: State<String>? = null,
     onSubagentClick: ((sessionId: String, agentName: String) -> Unit)? = null,
 ) {
     val isUser = message.info.role == "user"
     val c = LocalOcColors.current
 
+    fun partHasVisibleContent(type: String, text: String?): Boolean {
+        return when (type) {
+            "text", "reasoning" -> !text.isNullOrBlank()
+            "file", "image", "tool", "tool-invocation", "tool-result" -> true
+            else -> false
+        }
+    }
+
     // Separate text from file/image parts
-    val textParts = message.parts.filter { it.type == "text" }
+    val textParts = message.parts.filter { it.type == "text" && !it.text.isNullOrBlank() }
     val mediaParts = message.parts.filter { it.type == "file" || it.type == "image" }
+    val hasVisiblePartContent = message.parts.any { part ->
+        partHasVisibleContent(part.type, part.text)
+    }
+    val hasActiveStreamingSlot = !isUser && streamingTextState != null
+    if (!hasVisiblePartContent && !hasActiveStreamingSlot) return
 
     Column(
         Modifier.fillMaxWidth(),
@@ -72,7 +86,7 @@ fun MessageBubble(
                 ) {
                     SelectionContainer {
                         Column {
-                            textParts.forEach { part ->
+                            textParts.forEachIndexed { textIndex, part ->
                                 val isUserBgDark = (c.userBg.red + c.userBg.green + c.userBg.blue) / 3f < 0.5f
                                 val userCodeBg = if (isUserBgDark) {
                                     c.userBg.copy(
@@ -92,6 +106,7 @@ fun MessageBubble(
                                     style = OcType.body.copy(color = c.userInk),
                                     textColor = c.userInk,
                                     codeBg = userCodeBg,
+                                    contentKey = "${message.info.id}:user:text:$textIndex",
                                 )
                                 Spacer(Modifier.height(6.dp))
                             }
@@ -145,16 +160,33 @@ fun MessageBubble(
                 }
                 Spacer(Modifier.height(8.dp))
 
+                var textIndex = 0
                 message.parts.forEach { part ->
                     when (part.type) {
                         "text" -> {
-                            SelectionContainer {
-                                MarkdownText(
-                                    text = part.text ?: "",
-                                    style = OcType.body,
-                                )
+                            val currentTextIndex = textIndex++
+                            val text = streamingTextState?.value ?: part.text.orEmpty()
+                            if (text.isBlank()) {
+                                if (streamingTextState != null) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        OnlineDot()
+                                        Text("Thinking…", style = OcType.mono, color = c.ink3)
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                            } else {
+                                SelectionContainer {
+                                    MarkdownText(
+                                        text = text,
+                                        style = OcType.body,
+                                        contentKey = "${message.info.id}:assistant:text:$currentTextIndex",
+                                    )
+                                }
+                                Spacer(Modifier.height(6.dp))
                             }
-                            Spacer(Modifier.height(6.dp))
                         }
                         "tool" -> {
                             val toolName = part.tool ?: "tool"
