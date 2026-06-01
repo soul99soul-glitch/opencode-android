@@ -346,9 +346,20 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val api = OpenCodeApi(cfg)
                 val result = api.getMessages(sessionId)
                 result.onSuccess { serverMsgs ->
+                    val localTexts = mutableSetOf<String>()
+                    for (m in messages) {
+                        if (m.info.id.startsWith("local_") && m.info.role == "user") {
+                            for (part in m.parts) {
+                                if (part.type == "text" && part.text != null) localTexts.add(part.text)
+                            }
+                        }
+                    }
+                    val localMsgs = messages.filter { it.info.id.startsWith("local_") }
                     val serverOnly = serverMsgs.filter { msg ->
                         !msg.info.id.startsWith("local_") && !(msg.info.role == "user" &&
-                            msg.parts.any { it.type == "text" && it.text?.startsWith("Delegate to @") == true })
+                            msg.parts.any { part -> part.type == "text" &&
+                                (part.text?.startsWith("Delegate to @") == true ||
+                                 part.text in localTexts) })
                     }
                     // Check if server messages changed (by IDs + last part count)
                     val sig = serverOnly.joinToString("|") { it.info.id } + "_" +
@@ -580,29 +591,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                         EmptyChatState { inputText = TextFieldValue(it) }
                     }
                     else -> {
+                        Column(Modifier.fillMaxSize()) {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 20.dp),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                             reverseLayout = true,
                         ) {
-                            // Newest messages first (reversed) — streaming/thinking goes BEFORE messages
-                            if (streamingText.isNotEmpty()) {
-                                item(key = "streaming") { StreamingBubble(streamingText) }
-                            }
-                            if (isSending && streamingText.isEmpty()) {
-                                item(key = "thinking") {
-                                    Row(
-                                        Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    ) {
-                                        OnlineDot()
-                                        Text("Thinking…", style = OcType.mono, color = c.ink3)
-                                    }
-                                }
-                            }
                             items(reversedMessages, key = { it.info.id }) { msg ->
                                 MessageBubble(
                                     msg,
@@ -635,6 +631,21 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 )
                             }
                         }
+                        // Streaming / Thinking — OUTSIDE LazyColumn to avoid full-content re-evaluation
+                        if (streamingText.isNotEmpty()) {
+                            StreamingBubble(streamingText)
+                        }
+                        if (isSending && streamingText.isEmpty()) {
+                            Row(
+                                Modifier.padding(start = 28.dp, bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                OnlineDot()
+                                Text("Thinking…", style = OcType.mono, color = c.ink3)
+                            }
+                        }
+                        } // close Column
 
                         // Scroll-to-bottom FAB
                         Box(
