@@ -160,7 +160,10 @@ fun MessageBubble(
                             val toolName = part.tool ?: "tool"
                             val inputObj = part.state?.input
                             val subagentType = inputObj?.get("subagent_type")?.toString()?.trim('"')
-                            val subSid = part.sessionID
+                            // Metadata.sessionId = actual subtask session ID
+                            // Top-level part.sessionID = parent session ID
+                            val subSid = part.state?.metadata?.get("sessionId")?.toString()?.trim('"')
+                                ?: part.sessionID
 
                             // Task/subtask tool → capsule (with agent name if available)
                             if (toolName == "task" || toolName == "subtask") {

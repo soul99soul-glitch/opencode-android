@@ -587,16 +587,21 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 MessageBubble(
                                     msg,
                                     onSubagentClick = { sid, _ ->
-                                        val target = if (sid == sessionId || sid.isBlank()) subtaskWorkerSid else sid
-                                        if (target != null) {
-                                            onSubagentNavigate(target)
+                                        if (sid.isNotBlank() && sid != sessionId) {
+                                            onSubagentNavigate(sid)
                                         } else {
-                                            // Lazy lookup: search for subtask worker on click
+                                            // Lazy lookup: find subtask session by known patterns
                                             scope.launch {
                                                 val api = OpenCodeApi(prefs.config.first())
-                                                val found = api.listSessions().getOrNull()
-                                                    ?.firstOrNull { it.title.startsWith("Subtask worker from $sessionId") }
-                                                    ?.id
+                                                val sessions = api.listSessions().getOrNull() ?: emptyList()
+                                                // Pattern 1: "Subtask worker from $sessionId" (old format)
+                                                // Pattern 2: title containing "(@agent subagent)" (new format)
+                                                val found = sessions.firstOrNull { s ->
+                                                    s.id != sessionId && (
+                                                        s.title.startsWith("Subtask worker from $sessionId") ||
+                                                            (s.title.contains("(@") && s.title.contains("subagent)"))
+                                                    )
+                                                }?.id
                                                 api.close()
                                                 if (found != null) {
                                                     subtaskWorkerSid = found
