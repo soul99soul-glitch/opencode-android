@@ -81,6 +81,7 @@ import com.opencode.android.data.model.*
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.ui.component.*
 import com.opencode.android.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -307,6 +308,53 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                         }
                     }
                 }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Polling fallback: fetch messages every 200ms while sending.
+    // Guards against SSE drops on mobile — ensures UI never hangs on "thinking".
+    LaunchedEffect(sessionId, isSending) {
+        if (!isSending) return@LaunchedEffect
+        var lastServerSize = messages.count { !it.info.id.startsWith("local_") }
+        var lastChangeAt = System.currentTimeMillis()
+        var lastText = ""
+        while (isSending) {
+            delay(200)
+            if (!isSending) break
+            try {
+                val cfg = prefs.config.first()
+                val api = OpenCodeApi(cfg)
+                api.getMessages(sessionId).onSuccess { serverMsgs ->
+                    val localMsgs = messages.filter { it.info.id.startsWith("local_") }
+                    val serverOnly = serverMsgs.filter { !it.info.id.startsWith("local_") }
+                    val currentSize = serverOnly.size
+                    // Detect new messages or new parts on last message
+                    val lastParts = serverOnly.lastOrNull()?.parts?.size ?: 0
+                    val changed = currentSize != lastServerSize ||
+                        lastParts != (messages.filter { !it.info.id.startsWith("local_") }.lastOrNull()?.parts?.size ?: 0)
+                    if (changed) {
+                        messages = localMsgs + serverOnly
+                        lastServerSize = currentSize
+                        lastChangeAt = System.currentTimeMillis()
+                        // Streaming effect from polling when SSE delta isn't filling
+                        val lastTextPart = serverOnly.lastOrNull()?.parts
+                            ?.lastOrNull { it.type == "text" }?.text ?: ""
+                        if (lastTextPart.isNotEmpty() && streamingText.isEmpty()) {
+                            streamingText = lastTextPart
+                            lastText = lastTextPart
+                        } else if (lastTextPart.length > lastText.length && lastTextPart.startsWith(lastText)) {
+                            streamingText = lastTextPart
+                            lastText = lastTextPart
+                        }
+                    }
+                    // No change for 8s while sending → assume server is idle
+                    if (System.currentTimeMillis() - lastChangeAt > 8_000 && isSending) {
+                        isSending = false
+                        streamingText = ""
+                    }
+                }
+                api.close()
             } catch (_: Exception) {}
         }
     }
