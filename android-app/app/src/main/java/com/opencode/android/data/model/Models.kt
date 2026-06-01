@@ -31,6 +31,23 @@ data class Session(
 )
 
 @Serializable
+data class Project(
+    val id: String,
+    val worktree: String,
+    val vcs: String = "",
+    val sandboxes: List<String> = emptyList(),
+)
+
+@Serializable
+data class RemoteFileEntry(
+    val name: String,
+    val path: String,
+    val absolute: String,
+    val type: String,
+    val ignored: Boolean = false,
+)
+
+@Serializable
 data class SessionTime(
     val created: Long = 0,
     val updated: Long = 0

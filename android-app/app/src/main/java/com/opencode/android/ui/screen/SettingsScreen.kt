@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import com.opencode.android.data.api.OpenCodeApi
+import com.opencode.android.data.api.WorkspaceOption
+import com.opencode.android.data.api.fetchWorkspaceOptions
 import com.opencode.android.data.model.AgentInfo
 import com.opencode.android.data.model.ModelRef
 import com.opencode.android.data.model.Provider
@@ -32,6 +34,7 @@ import com.opencode.android.data.repository.AppearanceRepository
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.ui.component.Hairline
 import com.opencode.android.ui.component.MonoLabel
+import com.opencode.android.ui.component.WorkspacePicker
 import com.opencode.android.ui.component.pressable
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcAccent
@@ -70,6 +73,22 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
     var showModelPicker by remember { mutableStateOf(false) }
     var expandedProviderId by remember { mutableStateOf<String?>(null) }
+    var workspaces by remember { mutableStateOf<List<WorkspaceOption>>(emptyList()) }
+    var isLoadingWorkspaces by remember { mutableStateOf(false) }
+    var workspaceError by remember { mutableStateOf<String?>(null) }
+    val pinnedWorkspaces by prefs.pinnedWorkspaces.collectAsState(initial = emptySet())
+
+    suspend fun loadWorkspaces() {
+        if (isLoadingWorkspaces) return
+        isLoadingWorkspaces = true
+        workspaceError = null
+        val api = OpenCodeApi(config.copy(directory = ""))
+        api.fetchWorkspaceOptions()
+            .onSuccess { workspaces = it }
+            .onFailure { workspaceError = it.message ?: "Failed to load workspaces" }
+        api.close()
+        isLoadingWorkspaces = false
+    }
 
     // Load providers + agents from API
     LaunchedEffect(Unit) {
@@ -80,6 +99,10 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         api.fetchAgents()
             .onSuccess { all -> availableAgents = all.filter { it.mode == "primary" && !it.hidden } }
         api.close()
+    }
+
+    LaunchedEffect(config.host, config.port, config.password) {
+        loadWorkspaces()
     }
 
     Column(
@@ -119,6 +142,28 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             Hairline()
             SettingsRow("Directory", config.directory.ifBlank { "—" })
         }
+
+        Spacer(Modifier.height(22.dp))
+
+        // ── WORKSPACE ──
+        SectionHeader("WORKSPACE")
+        WorkspacePicker(
+            options = workspaces,
+            selectedPath = config.directory,
+            pinnedPaths = pinnedWorkspaces,
+            loading = isLoadingWorkspaces,
+            error = workspaceError,
+            onLoad = { scope.launch { loadWorkspaces() } },
+            onSelect = { path ->
+                scope.launch {
+                    prefs.saveConfig(config.copy(directory = path))
+                }
+            },
+            onTogglePinned = { path ->
+                scope.launch { prefs.togglePinnedWorkspace(path) }
+            },
+            modifier = Modifier.padding(horizontal = 22.dp),
+        )
 
         Spacer(Modifier.height(22.dp))
 
@@ -385,8 +430,24 @@ private fun SettingsRow(label: String, value: String) {
         Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
-        Text(value, style = OcType.mono, color = c.ink2)
+        Text(
+            label,
+            style = OcType.body,
+            color = c.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(min = 104.dp),
+        )
+        Spacer(Modifier.width(14.dp))
+        Text(
+            value,
+            style = OcType.mono,
+            color = c.ink2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

@@ -14,6 +14,10 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -75,8 +79,8 @@ class OpenCodeApi(config: ServerConfig) {
         if (response.status.value in 200..299) {
             response.body<T>()
         } else {
-            val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
-            throw Exception("HTTP ${response.status.value}: $body")
+            val body = try { response.bodyAsText() } catch (_: Exception) { "" }
+            throw OpenCodeHttpException(response.status.value, body)
         }
     }
 
@@ -84,8 +88,16 @@ class OpenCodeApi(config: ServerConfig) {
         client.get("$baseUrl/global/health")
     }
 
-    suspend fun listSessions(): Result<List<Session>> = safeRequest {
-        client.get("$baseUrl/session")
+    suspend fun listSessions(directory: String? = null, roots: Boolean = false): Result<List<Session>> = safeRequest {
+        val requestedDirectory = directory ?: directoryHeader
+        client.get("$baseUrl/experimental/session") {
+            requestedDirectory?.takeIf { it.isNotBlank() }?.let {
+                header("x-opencode-directory", it)
+                parameter("directory", it)
+            }
+            parameter("limit", 200)
+            if (roots) parameter("roots", true)
+        }
     }
 
     suspend fun getSession(sessionId: String): Result<Session> = safeRequest {
@@ -94,6 +106,33 @@ class OpenCodeApi(config: ServerConfig) {
 
     suspend fun fetchAgents(): Result<List<AgentInfo>> = safeRequest {
         client.get("$baseUrl/agent")
+    }
+
+    suspend fun fetchProjects(): Result<List<Project>> = safeRequest {
+        client.get("$baseUrl/project")
+    }
+
+    suspend fun fetchProjectRootFiles(directory: String): Result<List<RemoteFileEntry>> = runCatching {
+        val response = client.get("$baseUrl/file") {
+            header("x-opencode-directory", directory)
+            parameter("directory", directory)
+        }
+        if (response.status.value !in 200..299) {
+            val body = try { response.bodyAsText() } catch (_: Exception) { "" }
+            throw OpenCodeHttpException(response.status.value, body)
+        }
+        val raw = response.bodyAsText()
+        val entries = json.parseToJsonElement(raw) as? JsonArray ?: return@runCatching emptyList()
+        entries.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            RemoteFileEntry(
+                name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                path = obj["path"]?.jsonPrimitive?.contentOrNull ?: "",
+                absolute = obj["absolute"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                type = obj["type"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null,
+                ignored = obj["ignored"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false,
+            )
+        }
     }
 
     /** Fetch available skills for slash-command autocomplete */
@@ -156,8 +195,8 @@ class OpenCodeApi(config: ServerConfig) {
             }
             json.decodeFromString<Message>(raw)
         } else {
-            val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
-            throw Exception("HTTP ${response.status.value}: $body")
+            val body = try { response.bodyAsText() } catch (_: Exception) { "" }
+            throw OpenCodeHttpException(response.status.value, body)
         }
     }
 

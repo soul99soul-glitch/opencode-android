@@ -16,13 +16,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.OpenCodeApi
+import com.opencode.android.data.api.WorkspaceOption
+import com.opencode.android.data.api.fetchWorkspaceOptions
 import com.opencode.android.data.model.ServerConfig
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.ui.component.BlinkingCursor
-import com.opencode.android.ui.component.MonoLabel
 import com.opencode.android.ui.component.OcButton
 import com.opencode.android.ui.component.OcButtonStyle
 import com.opencode.android.ui.component.UnderlineField
+import com.opencode.android.ui.component.WorkspacePicker
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcType
 import kotlinx.coroutines.launch
@@ -40,6 +42,23 @@ fun SetupScreen(onComplete: () -> Unit) {
     var directory by remember { mutableStateOf("") }
     var isConnecting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var workspaces by remember { mutableStateOf<List<WorkspaceOption>>(emptyList()) }
+    var isLoadingWorkspaces by remember { mutableStateOf(false) }
+    var workspaceError by remember { mutableStateOf<String?>(null) }
+    val pinnedWorkspaces by prefs.pinnedWorkspaces.collectAsState(initial = emptySet())
+
+    suspend fun loadWorkspaces() {
+        if (isLoadingWorkspaces) return
+        isLoadingWorkspaces = true
+        workspaceError = null
+        val config = ServerConfig(host, port.toIntOrNull() ?: 4096, password, directory = "")
+        val api = OpenCodeApi(config)
+        api.fetchWorkspaceOptions()
+            .onSuccess { workspaces = it }
+            .onFailure { workspaceError = it.message ?: "Failed to load workspaces" }
+        api.close()
+        isLoadingWorkspaces = false
+    }
 
     Column(
         Modifier
@@ -79,6 +98,18 @@ fun SetupScreen(onComplete: () -> Unit) {
             }
             UnderlineField(password, { password = it }, "> PASSWORD", leading = { GlyphLock() }, placeholder = "Optional", password = true)
             UnderlineField(directory, { directory = it }, "> DIRECTORY", leading = { GlyphFolder() }, placeholder = "~/projects/opencode")
+            WorkspacePicker(
+                options = workspaces,
+                selectedPath = directory,
+                pinnedPaths = pinnedWorkspaces,
+                loading = isLoadingWorkspaces,
+                error = workspaceError,
+                onLoad = { scope.launch { loadWorkspaces() } },
+                onSelect = { directory = it },
+                onTogglePinned = { path ->
+                    scope.launch { prefs.togglePinnedWorkspace(path) }
+                },
+            )
         }
 
         // ── Endpoint preview ──

@@ -2,8 +2,10 @@ package com.opencode.android.ui.component
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
@@ -33,21 +35,32 @@ import com.opencode.android.ui.theme.OcType
  * 1) 按压反馈 —— 所有可点元素都挂这个,scale(0.975) + 140ms
  * ========================================================================== */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun Modifier.pressable(
     enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ): Modifier {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.975f else 1f, tween(140), label = "press")
-    return this
-        .graphicsLayer { scaleX = scale; scaleY = scale }
-        .clickable(
+    val scaled = graphicsLayer { scaleX = scale; scaleY = scale }
+    return if (onLongClick == null) {
+        scaled.clickable(
             interactionSource = interaction,
             indication = null,         // Plain 不用涟漪,只用缩放
             enabled = enabled,
             onClick = onClick,
         )
+    } else {
+        scaled.combinedClickable(
+            interactionSource = interaction,
+            indication = null,
+            enabled = enabled,
+            onLongClick = onLongClick,
+            onClick = onClick,
+        )
+    }
 }
 
 /* =============================================================================

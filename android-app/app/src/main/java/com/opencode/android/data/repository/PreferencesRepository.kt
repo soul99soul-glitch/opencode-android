@@ -23,6 +23,8 @@ class PreferencesRepository(context: Context) {
         val DEFAULT_AGENT = stringPreferencesKey("default_agent")
         val DEFAULT_MODEL_PROVIDER = stringPreferencesKey("default_model_provider")
         val DEFAULT_MODEL_ID = stringPreferencesKey("default_model_id")
+        val PINNED_WORKSPACES = stringSetPreferencesKey("pinned_workspace_paths")
+        val LEGACY_FAVORITE_WORKSPACES = stringSetPreferencesKey("favorite_workspace_paths")
     }
 
     val config: Flow<ServerConfig> = appContext.dataStore.data.map { prefs ->
@@ -63,6 +65,12 @@ class PreferencesRepository(context: Context) {
         prefs[Keys.DEFAULT_MODEL_ID] ?: ""
     }
 
+    val pinnedWorkspaces: Flow<Set<String>> = appContext.dataStore.data.map { prefs ->
+        prefs[Keys.PINNED_WORKSPACES]
+            ?: prefs[Keys.LEGACY_FAVORITE_WORKSPACES]
+            ?: emptySet()
+    }
+
     suspend fun saveDefaultAgent(agent: String) {
         appContext.dataStore.edit { it[Keys.DEFAULT_AGENT] = agent }
     }
@@ -71,6 +79,20 @@ class PreferencesRepository(context: Context) {
         appContext.dataStore.edit {
             it[Keys.DEFAULT_MODEL_PROVIDER] = provider
             it[Keys.DEFAULT_MODEL_ID] = modelId
+        }
+    }
+
+    suspend fun togglePinnedWorkspace(path: String) {
+        appContext.dataStore.edit { prefs ->
+            val current = prefs[Keys.PINNED_WORKSPACES]
+                ?: prefs[Keys.LEGACY_FAVORITE_WORKSPACES]
+                ?: emptySet()
+            prefs[Keys.PINNED_WORKSPACES] = if (path in current) {
+                current - path
+            } else {
+                current + path
+            }
+            prefs.remove(Keys.LEGACY_FAVORITE_WORKSPACES)
         }
     }
 }

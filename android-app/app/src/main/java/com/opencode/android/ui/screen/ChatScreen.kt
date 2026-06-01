@@ -101,17 +101,25 @@ private data class AttachmentItem(
 
 /** Short display names for agent modes */
 private fun shortAgent(agent: String?): String = when (agent) {
-    "orchestrator" -> "orch"
-    "designer"    -> "dsn"
-    "fixer"       -> "fix"
-    "explorer"    -> "exp"
-    "librarian"   -> "lib"
-    "oracle"      -> "ora"
-    "councillor"  -> "cou"
-    "code"        -> "code"
-    "plan"        -> "plan"
-    null          -> "code"
+    "orchestrator" -> "Orch"
+    "build"        -> "Build"
+    "plan"         -> "Plan"
+    "designer"     -> "Dsn"
+    "fixer"        -> "Fix"
+    "explorer"     -> "Exp"
+    "librarian"    -> "Lib"
+    "oracle"       -> "Ora"
+    "councillor"   -> "Cou"
+    "code"         -> "Code"
+    null           -> "Build"
     else          -> agent.take(5)
+}
+
+private val StandardPrimaryAgents = listOf("build", "plan", "orchestrator")
+
+private fun primaryAgentRank(agent: AgentInfo): Int {
+    val index = StandardPrimaryAgents.indexOf(agent.name)
+    return if (index >= 0) index else StandardPrimaryAgents.size
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -298,8 +306,22 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         // Fetch available agents (primary, non-hidden only)
         api.fetchAgents()
             .onSuccess { allAgents ->
-                availableAgents = allAgents.filter { it.mode == "primary" && !it.hidden }
+                availableAgents = allAgents
+                    .filter { it.mode == "primary" && !it.hidden }
+                    .sortedWith(compareBy(::primaryAgentRank, AgentInfo::name))
                 allKnownAgents = allAgents.filter { !it.hidden && it.mode != "primary" }
+                if (selectedAgent == null || availableAgents.none { it.name == selectedAgent }) {
+                    val defaultAgent = prefs.defaultAgent.first().ifBlank { "build" }
+                    selectedAgent = when {
+                        availableAgents.any { it.name == defaultAgent } -> defaultAgent
+                        availableAgents.any { it.name == "build" } -> "build"
+                        else -> availableAgents.firstOrNull()?.name
+                    }
+                }
+            }
+            .onFailure {
+                availableAgents = StandardPrimaryAgents.map { AgentInfo(name = it) }
+                if (selectedAgent == null) selectedAgent = "build"
             }
         // Fetch skills for / command autocomplete
         api.fetchSkills()

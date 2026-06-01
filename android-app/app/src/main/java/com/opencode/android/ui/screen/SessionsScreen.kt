@@ -30,10 +30,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.OpenCodeApi
+import com.opencode.android.data.model.ServerConfig
 import com.opencode.android.data.model.Session
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.ui.component.*
@@ -58,12 +60,12 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     var error by remember { mutableStateOf<String?>(null) }
     var isCreating by remember { mutableStateOf(false) }
     var hostPort by remember { mutableStateOf("127.0.0.1:4096") }
+    val config by prefs.config.collectAsState(initial = ServerConfig())
 
     suspend fun createNewSession() {
         if (isCreating) return
         isCreating = true
-        val cfg = prefs.config.first()
-        val api = OpenCodeApi(cfg)
+        val api = OpenCodeApi(config)
         api.createSession()
             .onSuccess { session ->
                 val t = session.title.substringBefore(" - ").ifBlank { session.slug }
@@ -74,10 +76,10 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
         isCreating = false
     }
 
-    fun refresh() {
+    fun refresh(configOverride: ServerConfig = config) {
         scope.launch {
             isLoading = true
-            val cfg = prefs.config.first()
+            val cfg = configOverride
             hostPort = if (cfg.host.startsWith("http://") || cfg.host.startsWith("https://"))
                 cfg.host.trimEnd('/') else "${cfg.host}:${cfg.port}"
             val api = OpenCodeApi(cfg)
@@ -95,7 +97,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
         }
     }
 
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(config) { refresh(config) }
 
     Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
@@ -173,7 +175,13 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                     ) {
                         Text("✕", style = OcType.brand, color = c.accent)
                         Spacer(Modifier.height(10.dp))
-                        Text(error ?: "Error", style = OcType.body, color = c.ink2)
+                        Text(
+                            error ?: "Error",
+                            style = OcType.body,
+                            color = c.ink2,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                         Spacer(Modifier.height(16.dp))
                         Box(
                             Modifier
