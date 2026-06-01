@@ -75,7 +75,8 @@ class OpenCodeApi(config: ServerConfig) {
         if (response.status.value in 200..299) {
             response.body<T>()
         } else {
-            throw Exception("HTTP ${response.status.value}: ${response.status.description}")
+            val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
+            throw Exception("HTTP ${response.status.value}: $body")
         }
     }
 

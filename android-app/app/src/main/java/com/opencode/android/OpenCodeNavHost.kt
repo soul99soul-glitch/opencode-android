@@ -14,6 +14,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import android.net.Uri
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.ui.screen.ChatScreen
 import com.opencode.android.ui.screen.SessionsScreen
@@ -74,7 +75,7 @@ fun OpenCodeNavHost() {
         }
         composable("sessions") {
             SessionsScreen(
-                onSessionClick = { id, title -> navController.navigate("chat/$id?title=${title ?: ""}") },
+                onSessionClick = { id, title -> navController.navigate("chat/$id?title=${Uri.encode(title ?: "")}") },
                 onSettingsClick = { navController.navigate("settings") }
             )
         }

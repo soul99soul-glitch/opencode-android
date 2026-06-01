@@ -377,14 +377,13 @@ private fun SubagentCapsule(agent: String, status: String, onClick: (() -> Unit)
 }
 
 @Composable
-fun StreamingBubble(text: String) {
+fun StreamingBubble(text: String, useMarkdown: Boolean = false) {
     val c = LocalOcColors.current
 
     Column(
         Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start,
     ) {
-        // Assistant streaming: ZERO decoration — no background, no bubble
         Column(Modifier.fillMaxWidth(0.92f)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -394,13 +393,20 @@ fun StreamingBubble(text: String) {
                 Text("opencode", style = OcType.monoStrong, color = c.ink3)
             }
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                MarkdownText(
-                    text = text,
-                    modifier = Modifier.weight(1f),
-                    style = OcType.body,
-                )
-                BlinkingCursor()
+            if (useMarkdown) {
+                // Pre-render as markdown during transition window — matches final MessageBubble layout
+                MarkdownText(text = text, style = OcType.body)
+            } else {
+                // Plain Text during active streaming — cheap, no re-parse per delta
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = text,
+                        modifier = Modifier.weight(1f),
+                        style = OcType.body,
+                        color = c.ink,
+                    )
+                    BlinkingCursor()
+                }
             }
         }
     }

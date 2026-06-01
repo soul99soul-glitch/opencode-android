@@ -133,7 +133,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     // Throttled SSE delta flush — prevents per-character recomposition
     LaunchedEffect(sessionId) {
         while (true) {
-            delay(50)
+            delay(120)
             val buf = sseBuffer
             if (buf.isNotEmpty() && buf != streamingText) {
                 streamingText = buf

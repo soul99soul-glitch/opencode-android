@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            OcTheme(darkTheme = dark, accent = OcAccent.entries[accentIdx].color) {
+            OcTheme(darkTheme = dark, accent = OcAccent.entries.getOrElse(accentIdx) { OcAccent.Green }.color) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = LocalOcColors.current.bg

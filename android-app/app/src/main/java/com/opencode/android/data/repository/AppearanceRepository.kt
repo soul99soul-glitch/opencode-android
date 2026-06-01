@@ -19,19 +19,21 @@ object AppearanceKeys {
     val ACCENT = intPreferencesKey("accent_index") // 对应 OcAccent.entries 下标
 }
 
-class AppearanceRepository(private val context: Context) {
+class AppearanceRepository(context: Context) {
+
+    private val appContext = context.applicationContext
 
     val darkTheme: Flow<Boolean> =
-        context.dataStore.data.map { it[AppearanceKeys.DARK] ?: false }
+        appContext.dataStore.data.map { it[AppearanceKeys.DARK] ?: false }
 
     val accentIndex: Flow<Int> =
-        context.dataStore.data.map { it[AppearanceKeys.ACCENT] ?: 0 }
+        appContext.dataStore.data.map { it[AppearanceKeys.ACCENT] ?: 0 }
 
     suspend fun setDark(dark: Boolean) {
-        context.dataStore.edit { it[AppearanceKeys.DARK] = dark }
+        appContext.dataStore.edit { it[AppearanceKeys.DARK] = dark }
     }
 
     suspend fun setAccentIndex(index: Int) {
-        context.dataStore.edit { it[AppearanceKeys.ACCENT] = index }
+        appContext.dataStore.edit { it[AppearanceKeys.ACCENT] = index }
     }
 }
