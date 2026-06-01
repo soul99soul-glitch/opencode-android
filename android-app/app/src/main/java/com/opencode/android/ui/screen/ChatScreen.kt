@@ -325,16 +325,15 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             try {
                 val cfg = prefs.config.first()
                 val api = OpenCodeApi(cfg)
-                api.getMessages(sessionId).onSuccess { serverMsgs ->
+                val result = api.getMessages(sessionId)
+                result.onSuccess { serverMsgs ->
                     val localMsgs = messages.filter { it.info.id.startsWith("local_") }
                     // Filter out server user messages that are delegation echo
-                    // (server stores our "Delegate to @... using task tool:" as user text)
                     val serverOnly = serverMsgs.filter { msg ->
                         !msg.info.id.startsWith("local_") && !(msg.info.role == "user" &&
                             msg.parts.any { it.type == "text" && it.text?.startsWith("Delegate to @") == true })
                     }
                     val currentSize = serverOnly.size
-                    // Detect new messages or new parts on last message
                     val lastParts = serverOnly.lastOrNull()?.parts?.size ?: 0
                     val changed = currentSize != lastServerSize ||
                         lastParts != (messages.filter { !it.info.id.startsWith("local_") }.lastOrNull()?.parts?.size ?: 0)
@@ -353,14 +352,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             lastText = lastTextPart
                         }
                     }
-                    // No change for 8s while sending → assume server is idle
-                    if (System.currentTimeMillis() - lastChangeAt > 8_000 && isSending) {
-                        isSending = false
-                        streamingText = ""
-                    }
                 }
                 api.close()
             } catch (_: Exception) {}
+            // No change for 8s while sending → assume server is idle (always checked)
+            if (System.currentTimeMillis() - lastChangeAt > 8_000 && isSending) {
+                isSending = false
+                streamingText = ""
+            }
         }
     }
 
@@ -1068,11 +1067,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     val cfg = prefs.config.first()
                                     val api = OpenCodeApi(cfg)
                                     api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
-                                        .onSuccess { assistantMsg ->
-                                            messages = messages + assistantMsg
+                                        .onSuccess { msg ->
+                                            // Only add assistant messages — user echoes handled by polling
+                                            if (msg.info.role == "assistant") {
+                                                messages = messages + msg
+                                            }
                                             isSending = false
                                             // Update selected model from response
-                                            assistantMsg.info.let { info ->
+                                            msg.info.let { info ->
                                                 if (info.providerID != null && info.modelID != null) {
                                                     selectedModel = ModelRef(info.providerID, info.modelID)
                                                 }

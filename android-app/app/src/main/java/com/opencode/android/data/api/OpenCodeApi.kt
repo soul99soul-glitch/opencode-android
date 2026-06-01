@@ -139,7 +139,7 @@ class OpenCodeApi(config: ServerConfig) {
 
     /** Send prompt — API returns the assistant message synchronously in response body */
     suspend fun sendPrompt(sessionId: String, parts: List<PromptPart>, agent: String? = null, model: ModelRef? = null): Result<Message> = runCatching {
-        val response = longPollClient.post("$baseUrl/session/$sessionId/message") {
+        val response = client.post("$baseUrl/session/$sessionId/message") {
             contentType(ContentType.Application.Json)
             setBody(PromptRequest(parts = parts, agent = agent, model = model))
         }
