@@ -61,8 +61,8 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+    import androidx.compose.runtime.*
+    import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -123,12 +123,13 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     val c = LocalOcColors.current
 
     var displayTitle by remember { mutableStateOf(sessionTitle?.ifBlank { null } ?: "新会话") }
-    var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
+    var messages = remember { mutableStateListOf<Message>() }
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val rawText = inputText.text
     var streamingText by remember { mutableStateOf("") }
+    val reversedMessages by remember { derivedStateOf { messages.asReversed() } }
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
     var allKnownAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
@@ -235,7 +236,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         val api = OpenCodeApi(config)
         api.getMessages(sessionId)
             .onSuccess { msgs ->
-                messages = msgs.takeLast(50)
+                messages.clear()
+                messages.addAll(msgs.takeLast(50))
                 // Extract model from last assistant message (syncs with desktop/other clients)
                 msgs.lastOrNull { it.info.role == "assistant" }?.info?.let { info ->
                     if (info.providerID != null && info.modelID != null) {
@@ -302,7 +304,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             scope.launch {
                                 val cfg = prefs.config.first()
                                 val api = OpenCodeApi(cfg)
-                                api.getMessages(sessionId).onSuccess { messages = it }
+                                api.getMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }
                                 api.close()
                             }
                             streamingText = ""
@@ -313,48 +315,46 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         }
     }
 
-    // Polling fallback: fetch messages every 200ms while sending.
-    // Guards against SSE drops on mobile — ensures UI never hangs on "thinking".
+    // Polling fallback: fetch messages every 500ms while sending.
+    // Lightweight — only refreshes message list, streaming deltas left to SSE.
     LaunchedEffect(sessionId, isSending) {
         if (!isSending) return@LaunchedEffect
-        var lastServerSize = messages.count { !it.info.id.startsWith("local_") }
+        var lastServerIds = ""
         var lastChangeAt = System.currentTimeMillis()
-        var lastText = ""
         while (isSending) {
-            delay(200)
+            delay(500)
             if (!isSending) break
             try {
                 val cfg = prefs.config.first()
                 val api = OpenCodeApi(cfg)
                 val result = api.getMessages(sessionId)
                 result.onSuccess { serverMsgs ->
-                    val localMsgs = messages.filter { it.info.id.startsWith("local_") }
                     val serverOnly = serverMsgs.filter { msg ->
                         !msg.info.id.startsWith("local_") && !(msg.info.role == "user" &&
                             msg.parts.any { it.type == "text" && it.text?.startsWith("Delegate to @") == true })
                     }
-                    val currentSize = serverOnly.size
-                    // Detect content changes, not just count — text can grow without new parts
-                    val latestText = serverOnly.lastOrNull { it.info.role == "assistant" }
-                        ?.parts?.lastOrNull { it.type == "text" }?.text.orEmpty()
-                    val changed = currentSize != lastServerSize ||
-                        latestText != lastText ||
-                        serverOnly.lastOrNull()?.parts?.size != (messages.filter { !it.info.id.startsWith("local_") }.lastOrNull()?.parts?.size ?: 0)
-                    if (changed) {
-                        messages = localMsgs + serverOnly
-                        lastServerSize = currentSize
+                    // Check if server messages changed (by IDs + last part count)
+                    val sig = serverOnly.joinToString("|") { it.info.id } + "_" +
+                        (serverOnly.lastOrNull()?.parts?.size ?: 0)
+                    if (sig != lastServerIds) {
+                        // Add only new server messages — never replace the whole list
+                        val currentIds = messages.filter { !it.info.id.startsWith("local_") }.map { it.info.id }.toSet()
+                        val newMsgs = serverOnly.filter { it.info.id !in currentIds }
+                        messages.addAll(newMsgs)
+                        lastServerIds = sig
                         lastChangeAt = System.currentTimeMillis()
-                        // Streaming effect from polling when SSE delta isn't filling
-                        if (latestText.isNotEmpty()) {
-                            streamingText = latestText
-                            lastText = latestText
+                        // Only set streaming text when SSE hasn't provided anything yet
+                        if (streamingText.isEmpty()) {
+                            val text = serverOnly.lastOrNull { it.info.role == "assistant" }
+                                ?.parts?.lastOrNull { it.type == "text" }?.text.orEmpty()
+                            if (text.isNotEmpty()) streamingText = text
                         }
                     }
                 }
                 api.close()
             } catch (_: Exception) {}
-            // No change for 15s while sending → assume server is idle
-            if (System.currentTimeMillis() - lastChangeAt > 15_000 && isSending) {
+            // No change for 20s while sending → assume server is idle
+            if (System.currentTimeMillis() - lastChangeAt > 20_000 && isSending) {
                 isSending = false
                 streamingText = ""
             }
@@ -585,7 +585,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     }
                                 }
                             }
-                            items(messages.asReversed(), key = { it.info.id }) { msg ->
+                            items(reversedMessages, key = { it.info.id }) { msg ->
                                 MessageBubble(
                                     msg,
                                     onSubagentClick = { sid, _ ->
@@ -1060,7 +1060,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     info = MessageInfo(id = "local_${System.currentTimeMillis()}", role = "user", agent = displayAgent),
                                     parts = msgParts
                                 )
-                                messages = messages + userMsg
+                                messages.add(userMsg)
                                 scope.launch {
                                     val cfg = prefs.config.first()
                                     val api = OpenCodeApi(cfg)
@@ -1068,7 +1068,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         .onSuccess { msg ->
                                             // Only add assistant messages — user echoes handled by polling
                                             if (msg.info.role == "assistant") {
-                                                messages = messages + msg
+                                                messages.add(msg)
                                             }
                                             isSending = false
                                             // Update selected model from response
@@ -1087,7 +1087,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         }
                                         .onFailure {
                                             val api2 = OpenCodeApi(cfg)
-                                            api2.getMessages(sessionId).onSuccess { messages = it }
+                                            api2.getMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }
                                             api2.close()
                                             val msg = it.message ?: "Unknown error"
                                             errorMsg = if (msg.contains("No suitable converter") || msg.contains("SerializationException"))
