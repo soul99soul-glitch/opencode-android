@@ -1,8 +1,17 @@
 # opencode-android
 
+[中文 README](README.zh-CN.md)
+
 opencode-android is an experimental native Android client for [OpenCode](https://opencode.ai). It explores what it would take to bring a coding-agent workflow, normally tied to a laptop terminal or browser, onto a phone or tablet.
 
 The project is not trying to be a generic chatbot. Its focus is the mobile developer experience around OpenCode: connecting to an OpenCode server, streaming coding-agent output, managing sessions and messages, and experimenting with Android-side runtime orchestration through Termux or local binaries.
+
+At a glance, the project highlights are:
+
+- A native Jetpack Compose client for OpenCode sessions and messages.
+- REST + SSE streaming integration for coding-agent interaction.
+- Early local server/runtime orchestration work for Android, Termux, and packaged binaries.
+- A mobile-first UX experiment for reviewing, delegating, and continuing agent work away from a desktop.
 
 This repository is independent from upstream OpenCode. It is an Android client and integration experiment that speaks to OpenCode's HTTP/SSE API; it is not an official OpenCode app.
 
