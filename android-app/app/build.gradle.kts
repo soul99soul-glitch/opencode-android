@@ -67,4 +67,6 @@ dependencies {
 
     // Markdown rendering (pure Compose)
     implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.41.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

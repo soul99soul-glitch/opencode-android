@@ -28,18 +28,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.opencode.android.data.model.Message
+import com.opencode.android.ui.screen.chat.ChatDisplayMessage
+import com.opencode.android.ui.screen.chat.MessagePhase
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcUserBubbleShape
 import com.opencode.android.ui.theme.OcType
 
 @Composable
 fun MessageBubble(
-    message: Message,
-    streamingTextState: State<String>? = null,
+    message: ChatDisplayMessage,
     onSubagentClick: ((sessionId: String, agentName: String) -> Unit)? = null,
 ) {
-    val isUser = message.info.role == "user"
+    val isUser = message.role == "user"
     val c = LocalOcColors.current
 
     fun partHasVisibleContent(type: String, text: String?): Boolean {
@@ -51,12 +51,12 @@ fun MessageBubble(
     }
 
     // Separate text from file/image parts
-    val textParts = message.parts.filter { it.type == "text" && !it.text.isNullOrBlank() }
-    val mediaParts = message.parts.filter { it.type == "file" || it.type == "image" }
-    val hasVisiblePartContent = message.parts.any { part ->
+    val textParts = message.visibleParts.filter { it.type == "text" && !it.text.isNullOrBlank() }
+    val mediaParts = message.visibleParts.filter { it.type == "file" || it.type == "image" }
+    val hasVisiblePartContent = message.visibleParts.any { part ->
         partHasVisibleContent(part.type, part.text)
     }
-    val hasActiveStreamingSlot = !isUser && streamingTextState != null
+    val hasActiveStreamingSlot = !isUser && message.phase == MessagePhase.Streaming
     if (!hasVisiblePartContent && !hasActiveStreamingSlot) return
 
     Column(
@@ -65,7 +65,7 @@ fun MessageBubble(
     ) {
         if (isUser) {
             // ── Agent tag (shown when sent to a specific subagent) ──
-            val agentTag = message.info.agent?.takeIf { it != "orchestrator" && it != "build" && it != "plan" }
+            val agentTag = message.agent?.takeIf { it != "orchestrator" && it != "build" && it != "plan" }
             if (agentTag != null) {
                 Text(
                     "→ @$agentTag",
@@ -106,7 +106,7 @@ fun MessageBubble(
                                     style = OcType.body.copy(color = c.userInk),
                                     textColor = c.userInk,
                                     codeBg = userCodeBg,
-                                    contentKey = "${message.info.id}:user:text:$textIndex",
+                                    contentKey = "${message.renderId}:${part.renderId}",
                                 )
                                 Spacer(Modifier.height(6.dp))
                             }
@@ -145,7 +145,7 @@ fun MessageBubble(
             // Assistant: ZERO decoration — no background, no bubble, just content
             Column(Modifier.fillMaxWidth(0.92f)) {
                 // Signature line — shows agent name when routed to subagent
-                val agentName = message.info.agent
+                val agentName = message.agent
                 val isSub = agentName != null && agentName != "orchestrator"
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -161,13 +161,13 @@ fun MessageBubble(
                 Spacer(Modifier.height(8.dp))
 
                 var textIndex = 0
-                message.parts.forEach { part ->
+                message.visibleParts.forEach { part ->
                     when (part.type) {
                         "text" -> {
                             val currentTextIndex = textIndex++
-                            val text = streamingTextState?.value ?: part.text.orEmpty()
+                            val text = part.text.orEmpty()
                             if (text.isBlank()) {
-                                if (streamingTextState != null) {
+                                if (message.phase == MessagePhase.Streaming) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -182,7 +182,7 @@ fun MessageBubble(
                                     MarkdownText(
                                         text = text,
                                         style = OcType.body,
-                                        contentKey = "${message.info.id}:assistant:text:$currentTextIndex",
+                                        contentKey = "${message.renderId}:${part.renderId}:$currentTextIndex",
                                     )
                                 }
                                 Spacer(Modifier.height(6.dp))
