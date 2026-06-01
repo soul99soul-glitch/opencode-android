@@ -129,6 +129,17 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val rawText = inputText.text
     var streamingText by remember { mutableStateOf("") }
+    var sseBuffer by remember { mutableStateOf("") }
+    // Throttled SSE delta flush — prevents per-character recomposition
+    LaunchedEffect(sessionId) {
+        while (true) {
+            delay(50)
+            val buf = sseBuffer
+            if (buf.isNotEmpty() && buf != streamingText) {
+                streamingText = buf
+            }
+        }
+    }
     val reversedMessages by remember { derivedStateOf { messages.asReversed() } }
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
@@ -289,25 +300,31 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val obj = json.parseToJsonElement(eventData).jsonObject
                 val type = obj["type"]?.jsonPrimitive?.content ?: ""
                 val props = obj["properties"]?.jsonObject
-                // Filter: SSE /event is global — only handle events for this session
+                // Filter: SSE /event is global — strictly match this session
                 val evtSid = props?.get("sessionID")?.jsonPrimitive?.content ?: ""
-                if (evtSid.isNotBlank() && evtSid != sessionId) return@collect
+                if (evtSid.isBlank() || evtSid != sessionId) return@collect
                 when (type) {
                     "message.part.delta" -> {
-                        val delta = props?.get("delta")?.jsonPrimitive?.content ?: ""
-                        streamingText += delta
+                        sseBuffer += props?.get("delta")?.jsonPrimitive?.content ?: ""
                     }
                     "session.status" -> {
                         val status = props?.get("status")?.jsonObject?.get("type")?.jsonPrimitive?.content
                         if (status == "idle" || status == "completed") {
                             isSending = false
-                            scope.launch {
-                                val cfg = prefs.config.first()
-                                val api = OpenCodeApi(cfg)
-                                api.getMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }
-                                api.close()
-                            }
+                            sseBuffer = ""
                             streamingText = ""
+                                scope.launch {
+                                    val cfg = prefs.config.first()
+                                    val api = OpenCodeApi(cfg)
+                                    api.getMessages(sessionId).onSuccess { serverMsgs ->
+                                        val currentIds = messages.map { it.info.id }.toSet()
+                                        serverMsgs.filter { it.info.id !in currentIds }
+                                            .forEach { messages.add(it) }
+                                    }
+                                    api.close()
+                                }
+                            streamingText = ""
+                                sseBuffer = ""
                         }
                     }
                 }
@@ -357,6 +374,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             if (System.currentTimeMillis() - lastChangeAt > 20_000 && isSending) {
                 isSending = false
                 streamingText = ""
+                                sseBuffer = ""
             }
         }
     }
@@ -997,6 +1015,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         api.close()
                                         isSending = false
                                         streamingText = ""
+                                sseBuffer = ""
                                     }
                                     return@pressable
                                 }
@@ -1043,6 +1062,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 inputText = TextFieldValue("")
                                 isSending = true
                                 streamingText = ""
+                                sseBuffer = ""
                                 // Build parts: text + attachments
                                 val parts = mutableListOf<PromptPart>()
                                 val myAttachments = attachments.toList()
@@ -1067,7 +1087,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
                                         .onSuccess { msg ->
                                             // Only add assistant messages — user echoes handled by polling
-                                            if (msg.info.role == "assistant") {
+                                            if (msg.info.role == "assistant" && messages.none { it.info.id == msg.info.id }) {
                                                 messages.add(msg)
                                             }
                                             isSending = false
