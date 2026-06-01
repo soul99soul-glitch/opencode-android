@@ -281,30 +281,31 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     // SSE events
     LaunchedEffect(sessionId) {
         prefs.config.flatMapLatest { config ->
-            val api = OpenCodeApi(config)
-            flow {
-                try { api.sessionEvents().collect { emit(it) } }
-                finally { api.close() }
-            }
+            OpenCodeApi(config).sessionEvents()
         }.collect { eventData ->
             try {
                 val obj = json.parseToJsonElement(eventData).jsonObject
                 val type = obj["type"]?.jsonPrimitive?.content ?: ""
+                val props = obj["properties"]?.jsonObject
+                // Filter: SSE /event is global — only handle events for this session
+                val evtSid = props?.get("sessionID")?.jsonPrimitive?.content ?: ""
+                if (evtSid.isNotBlank() && evtSid != sessionId) return@collect
                 when (type) {
                     "message.part.delta" -> {
-                        streamingText += obj["delta"]?.jsonPrimitive?.content ?: ""
+                        val delta = props?.get("delta")?.jsonPrimitive?.content ?: ""
+                        streamingText += delta
                     }
                     "session.status" -> {
-                        val status = obj["status"]?.jsonPrimitive?.content
+                        val status = props?.get("status")?.jsonObject?.get("type")?.jsonPrimitive?.content
                         if (status == "idle" || status == "completed") {
                             isSending = false
-                            streamingText = ""
                             scope.launch {
                                 val cfg = prefs.config.first()
                                 val api = OpenCodeApi(cfg)
                                 api.getMessages(sessionId).onSuccess { messages = it }
                                 api.close()
                             }
+                            streamingText = ""
                         }
                     }
                 }
@@ -328,35 +329,32 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val result = api.getMessages(sessionId)
                 result.onSuccess { serverMsgs ->
                     val localMsgs = messages.filter { it.info.id.startsWith("local_") }
-                    // Filter out server user messages that are delegation echo
                     val serverOnly = serverMsgs.filter { msg ->
                         !msg.info.id.startsWith("local_") && !(msg.info.role == "user" &&
                             msg.parts.any { it.type == "text" && it.text?.startsWith("Delegate to @") == true })
                     }
                     val currentSize = serverOnly.size
-                    val lastParts = serverOnly.lastOrNull()?.parts?.size ?: 0
+                    // Detect content changes, not just count — text can grow without new parts
+                    val latestText = serverOnly.lastOrNull { it.info.role == "assistant" }
+                        ?.parts?.lastOrNull { it.type == "text" }?.text.orEmpty()
                     val changed = currentSize != lastServerSize ||
-                        lastParts != (messages.filter { !it.info.id.startsWith("local_") }.lastOrNull()?.parts?.size ?: 0)
+                        latestText != lastText ||
+                        serverOnly.lastOrNull()?.parts?.size != (messages.filter { !it.info.id.startsWith("local_") }.lastOrNull()?.parts?.size ?: 0)
                     if (changed) {
                         messages = localMsgs + serverOnly
                         lastServerSize = currentSize
                         lastChangeAt = System.currentTimeMillis()
                         // Streaming effect from polling when SSE delta isn't filling
-                        val lastTextPart = serverOnly.lastOrNull()?.parts
-                            ?.lastOrNull { it.type == "text" }?.text ?: ""
-                        if (lastTextPart.isNotEmpty() && streamingText.isEmpty()) {
-                            streamingText = lastTextPart
-                            lastText = lastTextPart
-                        } else if (lastTextPart.length > lastText.length && lastTextPart.startsWith(lastText)) {
-                            streamingText = lastTextPart
-                            lastText = lastTextPart
+                        if (latestText.isNotEmpty()) {
+                            streamingText = latestText
+                            lastText = latestText
                         }
                     }
                 }
                 api.close()
             } catch (_: Exception) {}
-            // No change for 8s while sending → assume server is idle (always checked)
-            if (System.currentTimeMillis() - lastChangeAt > 8_000 && isSending) {
+            // No change for 15s while sending → assume server is idle
+            if (System.currentTimeMillis() - lastChangeAt > 15_000 && isSending) {
                 isSending = false
                 streamingText = ""
             }

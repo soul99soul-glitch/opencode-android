@@ -11,6 +11,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
@@ -174,41 +175,39 @@ class OpenCodeApi(config: ServerConfig) {
     }
 
     /**
-     * SSE via raw HttpURLConnection - avoids Ktor SSE module dependency issues.
-     * Reads the event stream line-by-line and emits "data:" payloads.
+     * SSE via raw HttpURLConnection — uses callbackFlow for safe cross-dispatcher emission.
      */
-    fun sessionEvents(): Flow<String> = flow {
-        withContext(Dispatchers.IO) {
-            val url = URL("$baseUrl/event")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("Accept", "text/event-stream")
-                setRequestProperty("Cache-Control", "no-cache")
-                authHeader?.let { setRequestProperty("Authorization", it) }
-                directoryHeader?.let { setRequestProperty("x-opencode-directory", it) }
-                connectTimeout = 10_000
-                readTimeout = 0 // no read timeout for SSE
-            }
-
-            try {
-                val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    val l = line ?: continue
-                    if (l.startsWith("data: ")) {
-                        val data = l.removePrefix("data: ")
-                        if (data.isNotBlank()) emit(data)
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                // Connection ended or errored
-            } finally {
-                conn.disconnect()
-            }
+    fun sessionEvents(): Flow<String> = callbackFlow {
+        val url = URL("$baseUrl/event")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            setRequestProperty("Accept", "text/event-stream")
+            setRequestProperty("Cache-Control", "no-cache")
+            authHeader?.let { setRequestProperty("Authorization", it) }
+            directoryHeader?.let { setRequestProperty("x-opencode-directory", it) }
+            connectTimeout = 10_000
+            readTimeout = 0
         }
-    }
+        try {
+            val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val l = line ?: continue
+                if (l.startsWith("data: ")) {
+                    val data = l.removePrefix("data: ")
+                    if (data.isNotBlank()) trySend(data)
+                }
+            }
+        } catch (_: CancellationException) {
+            // expected on close
+        } catch (_: Exception) {
+            // connection ended or errored
+        } finally {
+            conn.disconnect()
+            close()
+        }
+        awaitClose { conn.disconnect() }
+    }.flowOn(Dispatchers.IO)
 
     fun close() { client.close(); longPollClient.close() }
 }
