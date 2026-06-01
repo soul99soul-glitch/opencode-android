@@ -327,7 +327,12 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val api = OpenCodeApi(cfg)
                 api.getMessages(sessionId).onSuccess { serverMsgs ->
                     val localMsgs = messages.filter { it.info.id.startsWith("local_") }
-                    val serverOnly = serverMsgs.filter { !it.info.id.startsWith("local_") }
+                    // Filter out server user messages that are delegation echo
+                    // (server stores our "Delegate to @... using task tool:" as user text)
+                    val serverOnly = serverMsgs.filter { msg ->
+                        !msg.info.id.startsWith("local_") && !(msg.info.role == "user" &&
+                            msg.parts.any { it.type == "text" && it.text?.startsWith("Delegate to @") == true })
+                    }
                     val currentSize = serverOnly.size
                     // Detect new messages or new parts on last message
                     val lastParts = serverOnly.lastOrNull()?.parts?.size ?: 0
