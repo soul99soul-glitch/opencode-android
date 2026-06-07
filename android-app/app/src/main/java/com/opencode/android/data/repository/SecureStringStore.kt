@@ -39,6 +39,8 @@ class SecureStringStore(context: Context) {
         val payload = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
         val encoded = Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
             Base64.encodeToString(payload, Base64.NO_WRAP)
+        // Intentional commit() over apply(): callers (coroutines on Dispatchers.IO) need
+        // synchronous confirmation that secrets are persisted before proceeding.
         return prefs.edit().putString(key, encoded).commit()
     }
 

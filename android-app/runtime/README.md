@@ -1,5 +1,7 @@
 # OpenCode Runtime Companion
 
+> **⚠️ Deprecated as a standalone APK.** The companion APK (`com.opencode.android.runtime`) is superseded by the in-process bundled runtime (Option C) in the main app. This module now serves only as a **native binary holder** — it stores the `jniLibs/` (runtime binary) and `assets/` (glibc support) that the main app references via `sourceSets`. Do not install or build the companion APK separately.
+
 This module is the signed companion APK for Bundled Local mode.
 
 It intentionally owns native execution. The main app must not execute binaries

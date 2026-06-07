@@ -13,6 +13,9 @@ import kotlinx.coroutines.sync.Mutex
 import java.io.File
 import java.io.OutputStream
 
+@Deprecated(
+    message = "Use RuntimeProcessManager from the runtime package. This class uses --host (potentially wrong flag) and lacks SAF bridge, DNS, and workspace state support. Note: the replacement API is not a drop-in — it requires RuntimeProviderConfig, workspaceTreeUri, and serverPassword.",
+)
 class ProcessManager(private val context: Context) {
 
     enum class State { IDLE, STARTING, RUNNING, STOPPED, ERROR }

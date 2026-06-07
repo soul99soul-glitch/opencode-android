@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.opencode.android.runtime.WorkspacePaths
 import java.io.File
+import java.io.IOException
 
 data class ResolvedWorkspace(
     val runtimeDir: File,
@@ -13,6 +14,18 @@ data class ResolvedWorkspace(
 )
 
 object WorkspaceResolver {
+    /**
+     * Resolve symlinks so the path matches the server's own CWD resolution.
+     * On Android `/data/user/0/<pkg>` is a bind mount of `/data/data/<pkg>`;
+     * the native runtime resolves to the latter via getcwd(), so we must
+     * send the canonical form to avoid directory-filter mismatches.
+     */
+    private fun File.canonicalOrAbsolute(): File = try {
+        canonicalFile
+    } catch (_: IOException) {
+        absoluteFile
+    }
+
     fun resolve(
         context: Context,
         workspaceName: String,
@@ -21,7 +34,7 @@ object WorkspaceResolver {
         if (workspaceTreeUri.isNotBlank()) {
             SafWorkspaceBridge.requireAccess(context, workspaceTreeUri)
             val uri = Uri.parse(workspaceTreeUri)
-            val bridge = SafWorkspaceBridge.bridgeDir(context.filesDir, workspaceTreeUri)
+            val bridge = SafWorkspaceBridge.bridgeDir(context.filesDir, workspaceTreeUri).canonicalOrAbsolute()
             val label = SafWorkspaceBridge.displayName(context, uri)
                 ?: WorkspacePaths.sanitizeName(workspaceName)
             return ResolvedWorkspace(
@@ -31,7 +44,7 @@ object WorkspaceResolver {
                 usesSafBridge = true,
             )
         }
-        val dir = WorkspacePaths.resolve(context.filesDir, workspaceName)
+        val dir = WorkspacePaths.resolve(context.filesDir, workspaceName).canonicalOrAbsolute()
         WorkspacePaths.ensureReady(dir)
         val label = WorkspacePaths.sanitizeName(workspaceName)
         return ResolvedWorkspace(
@@ -47,9 +60,11 @@ object WorkspaceResolver {
         workspaceName: String,
         workspaceTreeUri: String,
     ): String {
-        if (workspaceTreeUri.isNotBlank()) {
-            return SafWorkspaceBridge.bridgeDir(filesDir, workspaceTreeUri).absolutePath
+        val file = if (workspaceTreeUri.isNotBlank()) {
+            SafWorkspaceBridge.bridgeDir(filesDir, workspaceTreeUri)
+        } else {
+            WorkspacePaths.resolve(filesDir, workspaceName)
         }
-        return WorkspacePaths.absolutePath(filesDir, workspaceName)
+        return try { file.canonicalPath } catch (_: IOException) { file.absolutePath }
     }
 }

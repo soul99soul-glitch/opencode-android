@@ -93,19 +93,20 @@ object OpenCodeNativeConfigSync {
             }
             if (validServers.isNotEmpty()) {
                 putJsonObject("mcp") {
-                    validServers.forEachIndexed { index, server ->
+                    validServers.forEach { server ->
                         val token = tokensByName[server.name].orEmpty().trim()
+                        val tokenEnv = "OPENCODE_MCP_TOKEN_${sanitizeEnvName(server.name.trim())}"
                         putJsonObject(server.name.trim()) {
                             put("type", "remote")
                             put("url", server.url.trim())
                             put("enabled", true)
                             if (token.isNotBlank()) {
                                 putJsonObject("headers") {
-                                    put("Authorization", "Bearer {env:OPENCODE_MCP_TOKEN_$index}")
+                                    put("Authorization", "Bearer {env:$tokenEnv}")
                                 }
                             } else if (server.hasToken) {
                                 putJsonObject("headers") {
-                                    put("Authorization", "Bearer {env:OPENCODE_MCP_TOKEN_$index}")
+                                    put("Authorization", "Bearer {env:$tokenEnv}")
                                 }
                             }
                         }
@@ -197,6 +198,12 @@ object OpenCodeNativeConfigSync {
         val tokensToImport: Map<String, String>,
     )
 
+    private fun sanitizeEnvName(name: String): String = name
+        .replace(Regex("[^A-Za-z0-9_]"), "_")
+        .trim('_')
+        .ifBlank { "unnamed" }
+        .uppercase()
+
     private fun parseRoot(raw: String, allowComments: Boolean): JsonObject {
         val trimmed = if (allowComments) stripJsonComments(raw.trim()) else raw.trim()
         val element = json.parseToJsonElement(trimmed)
@@ -204,13 +211,71 @@ object OpenCodeNativeConfigSync {
     }
 
     private fun stripJsonComments(raw: String): String {
-        val withoutBlock = raw.replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
+        // Both block and line comment stripping must be string-aware to avoid
+        // corrupting URLs like "https://example.com" or patterns like "/*keep*/".
+        val withoutBlock = stripBlockComments(raw)
         return withoutBlock.lineSequence()
-            .map { line ->
-                val idx = line.indexOf("//")
-                if (idx < 0) line else line.substring(0, idx)
-            }
+            .map { line -> stripLineComment(line) }
             .joinToString("\n")
+    }
+
+    /**
+     * Strip `/* ... */` block comments only when they appear outside double-quoted strings.
+     * Uses the same quote-tracking approach as [stripLineComment].
+     */
+    private fun stripBlockComments(text: String): String {
+        val result = StringBuilder(text.length)
+        var inString = false
+        var i = 0
+        while (i < text.length) {
+            val ch = text[i]
+            if (ch == '\\' && inString) {
+                result.append(text, i, minOf(i + 2, text.length))
+                i += 2
+                continue
+            }
+            if (ch == '"') {
+                inString = !inString
+                result.append(ch)
+                i++
+            } else if (!inString && i + 1 < text.length && text[i] == '/' && text[i + 1] == '*') {
+                // Skip until closing */
+                val end = text.indexOf("*/", i + 2)
+                if (end >= 0) {
+                    i = end + 2
+                } else {
+                    // Unclosed block comment — skip rest
+                    break
+                }
+            } else {
+                result.append(ch)
+                i++
+            }
+        }
+        return result.toString()
+    }
+
+    /**
+     * Strip `//` line comments only when they appear outside double-quoted strings.
+     * A naive `indexOf("//")` would break URLs like `"https://example.com"`.
+     */
+    private fun stripLineComment(line: String): String {
+        var inString = false
+        var i = 0
+        while (i < line.length) {
+            val ch = line[i]
+            if (ch == '\\' && inString) {
+                i += 2 // skip escaped character
+                continue
+            }
+            if (ch == '"') {
+                inString = !inString
+            } else if (!inString && i + 1 < line.length && line[i] == '/' && line[i + 1] == '/') {
+                return line.substring(0, i)
+            }
+            i++
+        }
+        return line
     }
 
     private fun parseMcpSection(root: JsonObject): List<ImportedMcpServer> {

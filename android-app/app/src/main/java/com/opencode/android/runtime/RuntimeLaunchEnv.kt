@@ -53,10 +53,10 @@ object RuntimeLaunchEnv {
         }
         if (includeProviderApiKey) {
             // MCP bearer tokens — env indirection keeps them out of the generated config file.
-            // Index must match RuntimeConfigWriter's {env:OPENCODE_MCP_TOKEN_i} references.
-            config.mcpServers.forEachIndexed { index, server ->
+            // Token env var is derived from the server name for stable references.
+            config.mcpServers.forEach { server ->
                 if (server.token.isNotBlank()) {
-                    env[config.mcpTokenEnv(index)] = server.token
+                    env[config.mcpTokenEnv(server)] = server.token
                 }
             }
         }

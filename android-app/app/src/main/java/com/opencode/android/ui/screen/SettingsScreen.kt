@@ -39,7 +39,6 @@ import com.opencode.android.data.model.LocalProviderPresets
 import com.opencode.android.data.model.McpConfigSource
 import com.opencode.android.data.model.McpServerConfig
 import com.opencode.android.data.model.parseModelIds
-import com.opencode.android.data.model.parsePluginSpecs
 import com.opencode.android.data.model.sanitizeLocalWorkspaceName
 import com.opencode.android.data.model.validate
 import com.opencode.android.data.model.Provider
@@ -51,11 +50,10 @@ import com.opencode.android.ui.component.Hairline
 import com.opencode.android.ui.component.LocalWorkspacePicker
 import com.opencode.android.ui.component.rememberSafFolderPicker
 import com.opencode.android.workspace.WorkspaceDisplay
-import com.opencode.android.ui.component.MonoLabel
-import com.opencode.android.ui.component.WorkspacePicker
 import com.opencode.android.ui.component.pressable
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcAccent
+import com.opencode.android.ui.screen.settings.*
 import com.opencode.android.ui.theme.OcType
 
 /**
@@ -822,195 +820,64 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
 
         if (mode == ConnectionMode.LOCAL_BUNDLED) {
             Spacer(Modifier.height(22.dp))
-            SectionHeader("LOCAL PROVIDER")
-            SettingsCard {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .pressable { providerEnabledDraft = !providerEnabledDraft }
-                        .padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Enable", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
-                    Text(
-                        if (providerEnabledDraft) "On" else "Off",
-                        style = OcType.mono,
-                        color = if (providerEnabledDraft) c.accent else c.ink3,
-                    )
-                }
-                Hairline()
-                ProviderPresetRow(
-                    preset = selectedProviderPreset,
-                    expanded = showProviderPresets,
-                    onClick = { showProviderPresets = !showProviderPresets },
-                )
-                AnimatedVisibility(visible = showProviderPresets) {
-                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        LocalProviderPresets.ALL.forEach { preset ->
-                            ProviderPresetOption(
-                                preset = preset,
-                                selected = preset.id == providerPresetIdDraft,
-                                onClick = { selectProviderPreset(preset) },
-                            )
-                        }
+            SettingsLocalProviderSection(
+                providerEnabledDraft = providerEnabledDraft,
+                onToggleEnabled = { providerEnabledDraft = !providerEnabledDraft },
+                selectedProviderPreset = selectedProviderPreset,
+                selectedPresetId = providerPresetIdDraft,
+                showProviderPresets = showProviderPresets,
+                onTogglePresets = { showProviderPresets = !showProviderPresets },
+                onSelectPreset = { selectProviderPreset(it) },
+                providerBaseUrlDraft = providerBaseUrlDraft,
+                onBaseUrlChange = {
+                    if (providerActiveBaseUrlDraft.trim() == providerBaseUrlDraft.trim()) {
+                        providerActiveBaseUrlDraft = it
                     }
-                }
-                Hairline()
-                EditableSettingsRow(
-                    label = "API Base",
-                    value = providerBaseUrlDraft,
-                    onValueChange = {
-                        if (providerActiveBaseUrlDraft.trim() == providerBaseUrlDraft.trim()) {
-                            providerActiveBaseUrlDraft = it
-                        }
-                        providerBaseUrlDraft = it
-                    },
-                )
-                Hairline()
-                EditableSettingsRow(
-                    label = "Coding Base",
-                    value = providerCodingBaseUrlDraft,
-                    onValueChange = {
-                        if (providerActiveBaseUrlDraft.trim() == providerCodingBaseUrlDraft.trim()) {
-                            providerActiveBaseUrlDraft = it
-                        }
-                        providerCodingBaseUrlDraft = it
-                    },
-                )
-                Hairline()
-                ProviderApiKeyRow(
-                    hasSavedKey = providerHasSavedKey,
-                    value = providerApiKeyDraft,
-                    onValueChange = { providerApiKeyDraft = it },
-                    onClear = { clearLocalProviderKey() },
-                )
-                Hairline()
-                ProviderModelRow(
-                    model = selectedProviderModel,
-                    expanded = showProviderModelPicker,
-                    loading = isFetchingProviderModels,
-                    hasCandidates = providerModelCandidates.isNotEmpty(),
-                    onClick = {
-                        showProviderModelPicker = !showProviderModelPicker
-                        if (providerModelCandidates.isEmpty() && !isFetchingProviderModels) fetchProviderModels()
-                    },
-                )
-                AnimatedVisibility(visible = showProviderModelPicker) {
-                    Column(Modifier.fillMaxWidth()) {
-                        Hairline()
-                        ProviderModelCandidatePicker(
-                            models = providerModelCandidates,
-                            selectedModel = selectedProviderModel,
-                            loading = isFetchingProviderModels,
-                            onRetry = { fetchProviderModels() },
-                            onSelect = { selectProviderModel(it) },
-                        )
+                    providerBaseUrlDraft = it
+                },
+                providerCodingBaseUrlDraft = providerCodingBaseUrlDraft,
+                onCodingBaseUrlChange = {
+                    if (providerActiveBaseUrlDraft.trim() == providerCodingBaseUrlDraft.trim()) {
+                        providerActiveBaseUrlDraft = it
                     }
-                }
-                Hairline()
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    LocalAction(
-                        "Apply",
-                        enabled = !providerEnabledDraft || providerValidationMessage == null,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { applyLocalProvider() }
-                    Text(
-                        providerValidationMessage ?: providerStatus ?: "—",
-                        style = OcType.mono.copy(fontSize = 11.sp),
-                        color = if (providerValidationMessage == null) c.ink3 else c.accent,
-                    )
-                }
-            }
+                    providerCodingBaseUrlDraft = it
+                },
+                providerApiKeyDraft = providerApiKeyDraft,
+                onApiKeyChange = { providerApiKeyDraft = it },
+                providerHasSavedKey = providerHasSavedKey,
+                onClearKey = { clearLocalProviderKey() },
+                selectedProviderModel = selectedProviderModel,
+                showProviderModelPicker = showProviderModelPicker,
+                isFetchingProviderModels = isFetchingProviderModels,
+                providerModelCandidates = providerModelCandidates,
+                onModelRowClick = {
+                    showProviderModelPicker = !showProviderModelPicker
+                    if (providerModelCandidates.isEmpty() && !isFetchingProviderModels) fetchProviderModels()
+                },
+                onFetchModels = { fetchProviderModels() },
+                onSelectModel = { selectProviderModel(it) },
+                providerValidationMessage = providerValidationMessage,
+                providerStatus = providerStatus,
+                onApply = { applyLocalProvider() },
+            )
         }
 
         if (mode == ConnectionMode.LOCAL_BUNDLED) {
             Spacer(Modifier.height(22.dp))
-            SectionHeader("MCP & PLUGINS")
-            SettingsCard {
-                mcpRows.forEachIndexed { index, row ->
-                    if (index > 0) Hairline()
-                    McpServerEditor(
-                        row = row,
-                        fromAgent = row.source == McpConfigSource.AGENT,
-                        onChange = { updated -> mcpRows = mcpRows.toMutableList().also { it[index] = updated } },
-                        onRemove = { mcpRows = mcpRows.toMutableList().also { it.removeAt(index) } },
-                    )
-                }
-                Hairline()
-                Box(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp)) {
-                    LocalAction("+ Add remote MCP", enabled = true, modifier = Modifier.fillMaxWidth()) {
-                        mcpRows = mcpRows + McpRowDraft()
-                    }
-                }
-                Hairline()
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text("Plugins (npm specs, one per line)", style = OcType.body, color = c.ink)
-                    BasicTextField(
-                        value = pluginsDraft,
-                        onValueChange = { pluginsDraft = it },
-                        cursorBrush = SolidColor(c.accent),
-                        textStyle = OcType.mono.copy(color = c.ink2, fontSize = 12.sp),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
-                        decorationBox = { inner ->
-                            if (pluginsDraft.isBlank()) {
-                                Text(
-                                    "opencode-plugin-foo\n@scope/bar@1.2.3",
-                                    style = OcType.mono.copy(fontSize = 12.sp),
-                                    color = c.ink4,
-                                )
-                            }
-                            inner()
-                        },
-                    )
-                    if (savedAgentPlugins.isNotEmpty()) {
-                        Text(
-                            "From agent: ${savedAgentPlugins.joinToString(", ")}",
-                            style = OcType.mono.copy(fontSize = 11.sp),
-                            color = c.ink3,
-                        )
-                    }
-                }
-                Hairline()
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .pressable { defaultPluginsDraft = !defaultPluginsDraft }
-                        .padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Default plugins", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
-                    Text(
-                        if (defaultPluginsDraft) "On" else "Off",
-                        style = OcType.mono,
-                        color = if (defaultPluginsDraft) c.accent else c.ink3,
-                    )
-                }
-                Hairline()
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        LocalAction(
-                            "Refresh from agent",
-                            enabled = true,
-                            modifier = Modifier.weight(1f),
-                        ) { refreshMcpAndPluginsFromAgent() }
-                        LocalAction("Apply", enabled = true, modifier = Modifier.weight(1f)) { applyMcpAndPlugins() }
-                    }
-                    Text(
-                        mcpStatus ?: "Bidirectional sync with files/.config/opencode · remote MCP (HTTP/SSE) only",
-                        style = OcType.mono.copy(fontSize = 11.sp),
-                        color = c.ink3,
-                    )
-                }
-            }
+            SettingsMcpSection(
+                mcpRows = mcpRows,
+                onMcpRowChange = { index, updated -> mcpRows = mcpRows.toMutableList().also { it[index] = updated } },
+                onMcpRowRemove = { index -> mcpRows = mcpRows.toMutableList().also { it.removeAt(index) } },
+                onAddMcpRow = { mcpRows = mcpRows + McpRowDraft() },
+                pluginsDraft = pluginsDraft,
+                onPluginsChange = { pluginsDraft = it },
+                savedAgentPlugins = savedAgentPlugins,
+                defaultPluginsDraft = defaultPluginsDraft,
+                onToggleDefaultPlugins = { defaultPluginsDraft = !defaultPluginsDraft },
+                onRefreshFromAgent = { refreshMcpAndPluginsFromAgent() },
+                onApply = { applyMcpAndPlugins() },
+                mcpStatus = mcpStatus,
+            )
         }
 
         if (mode == ConnectionMode.LAN || mode == ConnectionMode.LOCAL_EXTERNAL) {
@@ -1052,9 +919,8 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
 
         // ── WORKSPACE ──
         if (mode == ConnectionMode.LAN) {
-            SectionHeader("WORKSPACE")
-            WorkspacePicker(
-                options = workspaces,
+            SettingsWorkspaceSection(
+                workspaces = workspaces,
                 selectedPath = lanProfile.directory,
                 pinnedPaths = pinnedWorkspaces,
                 loading = isLoadingWorkspaces,
@@ -1068,7 +934,6 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 onTogglePinned = { path ->
                     scope.launch { prefs.togglePinnedWorkspace(path) }
                 },
-                modifier = Modifier.padding(horizontal = 22.dp),
             )
 
             Spacer(Modifier.height(22.dp))
@@ -1153,118 +1018,30 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         Spacer(Modifier.height(22.dp))
 
         // ── AGENT ──
-        SectionHeader("AGENT")
-        SettingsCard {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .pressable {
-                        if (availableAgents.size < 2) return@pressable
-                        val currentIdx = availableAgents.indexOfFirst { it.name == defaultAgent }
-                        val nextIdx = if (currentIdx >= 0) (currentIdx + 1) % availableAgents.size else 0
-                        scope.launch { prefs.saveDefaultAgent(availableAgents[nextIdx].name) }
-                    }
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Default Agent", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
-                Text(
-                    defaultAgent.replaceFirstChar { it.uppercase() },
-                    style = OcType.mono,
-                    color = c.ink2,
-                )
-            }
-            Hairline()
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .pressable {
-                        if (providers.isNotEmpty()) showModelPicker = !showModelPicker
-                    }
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Model", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
-                val modelLabel = if (defaultModelProvider.isNotBlank() && defaultModelId.isNotBlank()) {
-                    "$defaultModelProvider/$defaultModelId"
-                } else {
-                    if (providers.isEmpty()) "Loading…" else "Select…"
-                }
-                Text(
-                    modelLabel,
-                    style = OcType.mono,
-                    color = if (providers.isNotEmpty()) c.ink2 else c.ink3,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-
-        // Model picker panel — outside the card
-        AnimatedVisibility(visible = showModelPicker) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 22.dp)
-                    .background(c.surface2, RoundedCornerShape(14.dp))
-                    .heightIn(max = 280.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(vertical = 4.dp)
-            ) {
-                providers.forEach { provider ->
-                    val isExpanded = expandedProviderId == provider.id
-                    val isProviderSelected = defaultModelProvider == provider.id
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .pressable {
-                                expandedProviderId = if (isExpanded) null else provider.id
-                            }
-                            .background(if (isProviderSelected && !isExpanded) c.bg else Color.Transparent)
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            provider.name.ifBlank { provider.id },
-                            style = OcType.mono.copy(fontSize = 12.sp),
-                            color = if (isProviderSelected) c.accent else c.ink2,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            if (isExpanded) "−" else "+",
-                            style = OcType.mono.copy(fontSize = 12.sp),
-                            color = c.ink4,
-                        )
-                    }
-                    AnimatedVisibility(visible = isExpanded) {
-                        Column {
-                            provider.models.keys.forEach { modelId ->
-                                val isSelected = defaultModelProvider == provider.id && defaultModelId == modelId
-                                Box(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .pressable {
-                                            scope.launch { prefs.saveDefaultModel(provider.id, modelId) }
-                                            showModelPicker = false
-                                            expandedProviderId = null
-                                        }
-                                        .background(if (isSelected) c.bg else Color.Transparent)
-                                        .padding(horizontal = 24.dp, vertical = 6.dp)
-                                ) {
-                                    Text(
-                                        modelId,
-                                        style = OcType.mono.copy(fontSize = 11.sp),
-                                        color = if (isSelected) c.accent else c.ink3,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        SettingsAgentSection(
+            defaultAgent = defaultAgent,
+            availableAgents = availableAgents,
+            onCycleAgent = {
+                if (availableAgents.size < 2) return@SettingsAgentSection
+                val currentIdx = availableAgents.indexOfFirst { it.name == defaultAgent }
+                val nextIdx = if (currentIdx >= 0) (currentIdx + 1) % availableAgents.size else 0
+                scope.launch { prefs.saveDefaultAgent(availableAgents[nextIdx].name) }
+            },
+            defaultModelProvider = defaultModelProvider,
+            defaultModelId = defaultModelId,
+            providers = providers,
+            showModelPicker = showModelPicker,
+            onToggleModelPicker = {
+                if (providers.isNotEmpty()) showModelPicker = !showModelPicker
+            },
+            expandedProviderId = expandedProviderId,
+            onToggleProvider = { expandedProviderId = it },
+            onSelectModel = { providerId, modelId ->
+                scope.launch { prefs.saveDefaultModel(providerId, modelId) }
+                showModelPicker = false
+                expandedProviderId = null
+            },
+        )
 
         Spacer(Modifier.height(22.dp))
 
@@ -1308,500 +1085,4 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     }
 }
 
-@Composable
-private fun SectionHeader(text: String) {
-    val c = LocalOcColors.current
-    MonoLabel(text, modifier = Modifier.padding(horizontal = 22.dp, vertical = 6.dp))
-}
 
-@Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
-    val c = LocalOcColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 22.dp)
-            .background(c.surface, RoundedCornerShape(14.dp))
-            .padding(vertical = 2.dp),
-    ) {
-        content()
-    }
-}
-
-@Composable
-private fun SettingsRow(label: String, value: String) {
-    val c = LocalOcColors.current
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            style = OcType.body,
-            color = c.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(min = 104.dp),
-        )
-        Spacer(Modifier.width(14.dp))
-        Text(
-            value,
-            style = OcType.mono,
-            color = c.ink2,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun EditableSettingsRow(
-    label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    keyboardType: KeyboardType = KeyboardType.Text,
-    trailing: (@Composable () -> Unit)? = null,
-) {
-    val c = LocalOcColors.current
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            style = OcType.body,
-            color = c.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(min = 104.dp),
-        )
-        Spacer(Modifier.width(14.dp))
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            cursorBrush = SolidColor(c.accent),
-            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-            textStyle = OcType.mono.copy(color = c.ink2, textAlign = TextAlign.End),
-            modifier = Modifier.weight(1f),
-            decorationBox = { inner ->
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                    if (value.isBlank()) {
-                        Text("—", style = OcType.mono, color = c.ink4, textAlign = TextAlign.End)
-                    }
-                    inner()
-                }
-            },
-        )
-        if (trailing != null) {
-            Spacer(Modifier.width(8.dp))
-            trailing()
-        }
-    }
-}
-
-@Composable
-private fun InlineAction(label: String, onClick: () -> Unit) {
-    val c = LocalOcColors.current
-    Text(
-        label,
-        style = OcType.monoStrong.copy(fontSize = 11.sp),
-        color = c.accent,
-        modifier = Modifier.pressable { onClick() },
-    )
-}
-
-@Composable
-private fun ThemeOption(label: String, selected: Boolean, c: com.opencode.android.ui.theme.OcColors, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .clip(RoundedCornerShape(9.dp))
-            .then(if (selected) Modifier.background(c.raised) else Modifier)
-            .pressable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, style = OcType.monoStrong.copy(fontSize = 12.sp), color = if (selected) c.ink else c.ink3)
-    }
-}
-
-private fun ConnectionMode.shortLabel(): String =
-    when (this) {
-        ConnectionMode.LAN -> "LAN"
-        ConnectionMode.LOCAL_BUNDLED -> "Local"
-        ConnectionMode.LOCAL_EXTERNAL -> "External"
-    }
-
-@Composable
-private fun ModeCycleButton(
-    label: String,
-    c: com.opencode.android.ui.theme.OcColors,
-    onClick: () -> Unit,
-) {
-    Box(
-        Modifier
-            .widthIn(min = 76.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(c.surface2)
-            .pressable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            style = OcType.monoStrong.copy(fontSize = 12.sp),
-            color = c.accent,
-        )
-    }
-}
-
-@Composable
-private fun ProviderPresetRow(
-    preset: LocalProviderPreset,
-    expanded: Boolean,
-    onClick: () -> Unit,
-) {
-    val c = LocalOcColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .pressable { onClick() }
-            .padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Provider", style = OcType.body, color = c.ink, modifier = Modifier.widthIn(min = 104.dp))
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-            Text(
-                preset.displayName,
-                style = OcType.mono,
-                color = c.ink2,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.End,
-            )
-            Text(
-                preset.apiBaseUrl.shortEndpoint(),
-                style = OcType.mono.copy(fontSize = 10.sp),
-                color = c.ink4,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.End,
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        Text(if (expanded) "−" else "+", style = OcType.mono, color = c.ink4)
-    }
-}
-
-@Composable
-private fun ProviderPresetOption(
-    preset: LocalProviderPreset,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val c = LocalOcColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(if (selected) c.bg else Color.Transparent)
-            .pressable { onClick() }
-            .padding(horizontal = 18.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    preset.displayName,
-                    style = OcType.monoStrong.copy(fontSize = 12.sp),
-                    color = if (selected) c.accent else c.ink2,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (preset.defaultEnabled) {
-                    Spacer(Modifier.width(8.dp))
-                    Text("Default", style = OcType.mono.copy(fontSize = 10.sp), color = c.ink4)
-                }
-            }
-            Text(
-                preset.apiBaseUrl.shortEndpoint(),
-                style = OcType.mono.copy(fontSize = 10.sp),
-                color = c.ink4,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(
-            if (selected) "Selected" else "Use",
-            style = OcType.mono.copy(fontSize = 11.sp),
-            color = if (selected) c.accent else c.ink4,
-        )
-    }
-}
-
-@Composable
-private fun ProviderModelRow(
-    model: String,
-    expanded: Boolean,
-    loading: Boolean,
-    hasCandidates: Boolean,
-    onClick: () -> Unit,
-) {
-    val c = LocalOcColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .pressable { onClick() }
-            .padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Model", style = OcType.body, color = c.ink, modifier = Modifier.widthIn(min = 104.dp))
-        Spacer(Modifier.width(14.dp))
-        Text(
-            when {
-                model.isNotBlank() -> model
-                loading -> "Fetching..."
-                hasCandidates -> "Choose..."
-                else -> "Choose..."
-            },
-            style = OcType.mono,
-            color = if (model.isNotBlank()) c.ink2 else c.ink4,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(if (expanded) "−" else "+", style = OcType.mono, color = c.ink4)
-    }
-}
-
-@Composable
-private fun ProviderModelCandidatePicker(
-    models: List<String>,
-    selectedModel: String,
-    loading: Boolean,
-    onRetry: () -> Unit,
-    onSelect: (String) -> Unit,
-) {
-    val c = LocalOcColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Models", style = OcType.mono.copy(fontSize = 11.sp), color = c.ink4, modifier = Modifier.weight(1f))
-            Text(
-                if (loading) "fetching..." else "Retry",
-                style = OcType.mono.copy(fontSize = 11.sp),
-                color = if (loading) c.ink4 else c.accent,
-                modifier = Modifier.pressable(enabled = !loading) { onRetry() },
-            )
-        }
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(max = 220.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (models.isEmpty()) {
-                Text(
-                    if (loading) "Loading models..." else "No models yet",
-                    style = OcType.mono.copy(fontSize = 11.sp),
-                    color = c.ink4,
-                    modifier = Modifier.padding(vertical = 8.dp),
-                )
-            }
-            models.forEach { model ->
-                val selected = model == selectedModel
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .pressable { onSelect(model) }
-                        .background(if (selected) c.accent.copy(alpha = 0.12f) else c.surface2, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 12.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        model,
-                        style = OcType.mono.copy(fontSize = 11.sp),
-                        color = if (selected) c.accent else c.ink2,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        if (selected) "selected" else "select",
-                        style = OcType.mono.copy(fontSize = 10.sp),
-                        color = if (selected) c.accent else c.ink4,
-                    )
-                }
-            }
-        }
-    }
-}
-
-private fun String.shortEndpoint(): String =
-    removePrefix("https://")
-        .removePrefix("http://")
-        .trimEnd('/')
-
-@Composable
-private fun ProviderApiKeyRow(
-    hasSavedKey: Boolean,
-    value: String,
-    onValueChange: (String) -> Unit,
-    onClear: () -> Unit,
-) {
-    val c = LocalOcColors.current
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "API Key",
-            style = OcType.body,
-            color = c.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(min = 104.dp),
-        )
-        Spacer(Modifier.width(14.dp))
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            cursorBrush = SolidColor(c.accent),
-            visualTransformation = PasswordVisualTransformation(),
-            textStyle = OcType.mono.copy(color = c.ink2, textAlign = TextAlign.End),
-            modifier = Modifier.weight(1f),
-            decorationBox = { inner ->
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                    if (value.isBlank()) {
-                        Text(
-                            if (hasSavedKey) "Saved" else "—",
-                            style = OcType.mono,
-                            color = if (hasSavedKey) c.ink2 else c.ink4,
-                            textAlign = TextAlign.End,
-                        )
-                    }
-                    inner()
-                }
-            },
-        )
-        if (hasSavedKey) {
-            Spacer(Modifier.width(8.dp))
-            Box(
-                Modifier.pressable { onClear() }.padding(horizontal = 4.dp, vertical = 2.dp),
-            ) {
-                Text("Clear", style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
-            }
-        }
-    }
-}
-
-@Composable
-private fun LocalAction(
-    label: String,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val c = LocalOcColors.current
-    Box(
-        modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(if (enabled) c.surface2 else c.bg)
-            .pressable(enabled = enabled) { onClick() }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, style = OcType.monoStrong.copy(fontSize = 11.sp), color = if (enabled) c.accent else c.ink4)
-    }
-}
-
-private data class McpRowDraft(
-    val name: String = "",
-    val url: String = "",
-    val token: String = "",
-    val hasSavedToken: Boolean = false,
-    val source: String = McpConfigSource.APP,
-)
-
-@Composable
-private fun McpServerEditor(
-    row: McpRowDraft,
-    fromAgent: Boolean,
-    onChange: (McpRowDraft) -> Unit,
-    onRemove: () -> Unit,
-) {
-    val c = LocalOcColors.current
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            McpField(row.name, "name", Modifier.weight(1f)) { onChange(row.copy(name = it)) }
-            if (fromAgent) {
-                Spacer(Modifier.width(6.dp))
-                Text("agent", style = OcType.mono.copy(fontSize = 10.sp), color = c.accent)
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "✕",
-                style = OcType.monoStrong.copy(fontSize = 13.sp),
-                color = c.ink4,
-                modifier = Modifier.pressable { onRemove() }.padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
-        McpField(row.url, "https://mcp.example.com/sse", Modifier.fillMaxWidth()) { onChange(row.copy(url = it)) }
-        BasicTextField(
-            value = row.token,
-            onValueChange = { onChange(row.copy(token = it)) },
-            singleLine = true,
-            cursorBrush = SolidColor(c.accent),
-            visualTransformation = PasswordVisualTransformation(),
-            textStyle = OcType.mono.copy(color = c.ink2, fontSize = 12.sp),
-            modifier = Modifier.fillMaxWidth(),
-            decorationBox = { inner ->
-                if (row.token.isBlank()) {
-                    Text(
-                        if (row.hasSavedToken) "token: saved (leave blank to keep)" else "bearer token (optional)",
-                        style = OcType.mono.copy(fontSize = 12.sp),
-                        color = c.ink4,
-                    )
-                }
-                inner()
-            },
-        )
-    }
-}
-
-@Composable
-private fun McpField(
-    value: String,
-    placeholder: String,
-    modifier: Modifier = Modifier,
-    onChange: (String) -> Unit,
-) {
-    val c = LocalOcColors.current
-    BasicTextField(
-        value = value,
-        onValueChange = onChange,
-        singleLine = true,
-        cursorBrush = SolidColor(c.accent),
-        textStyle = OcType.mono.copy(color = c.ink2, fontSize = 12.sp),
-        modifier = modifier,
-        decorationBox = { inner ->
-            if (value.isBlank()) {
-                Text(placeholder, style = OcType.mono.copy(fontSize = 12.sp), color = c.ink4)
-            }
-            inner()
-        },
-    )
-}

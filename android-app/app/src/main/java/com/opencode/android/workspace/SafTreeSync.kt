@@ -4,10 +4,17 @@ import android.content.Context
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
+import android.util.Log
 import java.io.File
 
 /** Two-way sync between a SAF document tree and a local bridge directory. */
 object SafTreeSync {
+    private const val TAG = "SafTreeSync"
+
+    /** When false (default), files missing from the bridge directory are NOT deleted from the
+     *  external SAF folder. Enable only after user explicitly opts in. */
+    var pruneRemoteEnabled = false
+
     fun syncDown(context: Context, treeUri: Uri, targetDir: File) {
         targetDir.mkdirs()
         val root = DocumentFile.fromTreeUri(context, treeUri) ?: return
@@ -43,7 +50,7 @@ object SafTreeSync {
     private fun copyFile(context: Context, source: DocumentFile, target: File) {
         target.parentFile?.mkdirs()
         val sourceModified = source.lastModified()
-        if (target.exists() && target.lastModified() >= sourceModified) return
+        if (target.exists() && target.lastModified() >= sourceModified && target.length() == source.length()) return
         context.contentResolver.openInputStream(source.uri)?.use { input ->
             target.outputStream().use { output -> input.copyTo(output) }
         }
@@ -103,7 +110,12 @@ object SafTreeSync {
             val name = remote.name ?: return@forEach
             if (!SafSyncPolicy.shouldSync(name)) return@forEach
             if (name !in localNames) {
-                remote.delete()
+                if (pruneRemoteEnabled) {
+                    Log.w(TAG, "Pruning remote file (not in bridge): $name")
+                    remote.delete()
+                } else {
+                    Log.d(TAG, "Remote file not in bridge, but prune disabled — keeping: $name")
+                }
             }
         }
     }

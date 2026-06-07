@@ -46,6 +46,9 @@ import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcButtonShape
 import com.opencode.android.ui.theme.OcType
 import kotlinx.coroutines.flow.first
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -181,6 +184,22 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
         } else {
             refreshNow(active)
         }
+    }
+
+    // Refresh session list when returning to this screen (e.g., from ChatScreen).
+    // LaunchedEffect above only re-runs when identityKey changes, which won't happen
+    // on a simple back navigation.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val active = endpoint ?: return@LifecycleEventObserver
+                refreshJob?.cancel()
+                refreshJob = scope.launch { refreshNow(active) }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {

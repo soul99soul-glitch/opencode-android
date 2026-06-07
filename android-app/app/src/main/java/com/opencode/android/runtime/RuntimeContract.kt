@@ -31,6 +31,26 @@ object RuntimeContract {
     const val SERVER_USERNAME_ENV = "OPENCODE_SERVER_USERNAME"
     const val SERVER_PASSWORD_ENV = "OPENCODE_SERVER_PASSWORD"
 
+    /** Sanitize an MCP server name for use as an environment variable suffix. */
+    fun mcpTokenEnvForName(name: String): String {
+        val sanitized = name.trim()
+            .replace(Regex("[^A-Za-z0-9_]"), "_")
+            .trim('_')
+            .ifBlank { "unnamed" }
+            .uppercase()
+        return "OPENCODE_MCP_TOKEN_$sanitized"
+    }
+
+    /**
+     * Detect collisions in sanitized MCP token env var names.
+     * Returns a map from sanitized name to the list of original names that map to it.
+     * Any entry with size > 1 indicates a collision.
+     */
+    fun mcpTokenEnvCollisions(names: List<String>): Map<String, List<String>> {
+        return names.groupBy { mcpTokenEnvForName(it) }
+            .filter { it.value.size > 1 }
+    }
+
     const val EXPECTED_RUNTIME_VERSION = "0.1.0"
     const val MANIFEST_URL = "https://github.com/soul99soul-glitch/opencode-android/releases/latest/download/runtime-manifest.json"
 }

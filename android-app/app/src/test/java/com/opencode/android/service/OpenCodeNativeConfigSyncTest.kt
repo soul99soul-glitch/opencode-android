@@ -152,11 +152,113 @@ class OpenCodeNativeConfigSyncTest {
         val mcp = root["mcp"]!!.jsonObject["ctx"]!!.jsonObject
         assertEquals("remote", mcp["type"]!!.jsonPrimitive.content)
         assertEquals(
-            "Bearer {env:OPENCODE_MCP_TOKEN_0}",
+            "Bearer {env:OPENCODE_MCP_TOKEN_CTX}",
             mcp["headers"]!!.jsonObject["Authorization"]!!.jsonPrimitive.content,
         )
         assertEquals("plugin-a", root["plugin"]!!.jsonArray.first().jsonPrimitive.content)
         assertFalse(File(configDir, "opencode.json").readText().contains("tok-123"))
+    }
+
+    @Test
+    fun stripJsonCommentsPreservesUrlsInJsonc() {
+        val filesDir = tempDir("jsonc-url")
+        val configDir = OpenCodeNativeConfigSync.nativeConfigDir(filesDir)
+        configDir.mkdirs()
+        // Write a .jsonc file with URLs that contain "//"
+        File(configDir, "opencode.jsonc").writeText(
+            """
+            // This is a comment
+            {
+              "mcp": {
+                "context7": {
+                  "type": "remote",
+                  "url": "https://mcp.example.com/sse",
+                  "enabled": true
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val snapshot = OpenCodeNativeConfigSync.read(filesDir)
+
+        assertEquals(1, snapshot.mcpServers.size)
+        assertEquals("https://mcp.example.com/sse", snapshot.mcpServers.first().url)
+        assertEquals("context7", snapshot.mcpServers.first().name)
+    }
+
+    @Test
+    fun stripJsonCommentsPreservesMultipleUrls() {
+        val filesDir = tempDir("jsonc-multi-url")
+        val configDir = OpenCodeNativeConfigSync.nativeConfigDir(filesDir)
+        configDir.mkdirs()
+        File(configDir, "opencode.jsonc").writeText(
+            """{
+              "mcp": {
+                "a": {"type": "remote", "url": "https://a.example.com/path"},
+                "b": {"type": "remote", "url": "http://b.local:8080/api"},
+                "c": {"type": "remote", "url": "https://c.example.com/sse?q=1&r=2"}
+              }
+            }""",
+        )
+
+        val snapshot = OpenCodeNativeConfigSync.read(filesDir)
+
+        assertEquals(3, snapshot.mcpServers.size)
+        val urls = snapshot.mcpServers.map { it.url }.toSet()
+        assertTrue(urls.contains("https://a.example.com/path"))
+        assertTrue(urls.contains("http://b.local:8080/api"))
+        assertTrue(urls.contains("https://c.example.com/sse?q=1&r=2"))
+    }
+
+    @Test
+    fun stripBlockCommentsPreservesUrlsInStrings() {
+        val filesDir = tempDir("jsonc-block-url")
+        val configDir = OpenCodeNativeConfigSync.nativeConfigDir(filesDir)
+        configDir.mkdirs()
+        File(configDir, "opencode.jsonc").writeText(
+            """{
+              /* block comment about config */
+              "mcp": {
+                "svc": {"type": "remote", "url": "https://x.example.com/a/*keep*/b", "enabled": true}
+              }
+            }""",
+        )
+
+        val snapshot = OpenCodeNativeConfigSync.read(filesDir)
+
+        assertEquals(1, snapshot.mcpServers.size)
+        // The /*keep*/ inside the URL string must NOT be treated as a block comment
+        assertEquals("https://x.example.com/a/*keep*/b", snapshot.mcpServers.first().url)
+    }
+
+    @Test
+    fun writeUsesNameBasedTokenEnvVars() {
+        val filesDir = tempDir("token-env-name")
+        val configDir = OpenCodeNativeConfigSync.nativeConfigDir(filesDir)
+        configDir.mkdirs()
+        File(configDir, "opencode.json").writeText("{}")
+
+        OpenCodeNativeConfigSync.write(
+            filesDir = filesDir,
+            servers = listOf(
+                McpServerConfig("my-server", "https://mcp.example/sse", hasToken = true),
+                McpServerConfig("another one!", "https://other.example/sse", hasToken = true),
+            ),
+            pluginSpecs = emptyList(),
+            tokensByName = mapOf("my-server" to "secret-1", "another one!" to "secret-2"),
+        )
+
+        val configText = File(configDir, "opencode.json").readText()
+        // Name-based env vars: non-alphanumeric chars replaced with _, then uppercased
+        assertTrue("Should contain name-based token env for 'my-server'", configText.contains("OPENCODE_MCP_TOKEN_MY_SERVER"))
+        assertTrue("Should contain name-based token env for 'another one!'", configText.contains("OPENCODE_MCP_TOKEN_ANOTHER_ONE"))
+        // Should NOT contain index-based tokens
+        assertFalse("Should not contain index-based OPENCODE_MCP_TOKEN_0", configText.contains("OPENCODE_MCP_TOKEN_0"))
+        assertFalse("Should not contain index-based OPENCODE_MCP_TOKEN_1", configText.contains("OPENCODE_MCP_TOKEN_1"))
+        // Should not contain raw tokens in plaintext
+        assertFalse("Should not contain raw token secret-1", configText.contains("secret-1"))
+        assertFalse("Should not contain raw token secret-2", configText.contains("secret-2"))
     }
 
     private fun tempDir(prefix: String): File =

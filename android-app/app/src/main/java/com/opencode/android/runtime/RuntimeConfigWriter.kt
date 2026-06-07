@@ -2,10 +2,8 @@ package com.opencode.android.runtime
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.io.File
 
@@ -27,8 +25,8 @@ data class RuntimeProviderConfig(
     val plugins: List<String> = emptyList(),
     val defaultPlugins: Boolean = false,
 ) {
-    /** Env var name holding the bearer token for the MCP server at [index]. */
-    fun mcpTokenEnv(index: Int): String = "OPENCODE_MCP_TOKEN_$index"
+    /** Env var name holding the bearer token for the given MCP server. */
+    fun mcpTokenEnv(server: RuntimeMcpServer): String = RuntimeContract.mcpTokenEnvForName(server.name)
 }
 
 object RuntimeConfigWriter {
@@ -71,11 +69,6 @@ object RuntimeConfigWriter {
             }
         }
 
-        fun RuntimeMcpServer.isValid(): Boolean =
-            name.isNotBlank() && (url.startsWith("http://") || url.startsWith("https://"))
-        val hasMcp = config.mcpServers.any { it.isValid() }
-        val validPlugins = config.plugins.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-
         val generated = buildJsonObject {
             put("\$schema", "https://opencode.ai/config.json")
             put("model", modelRef)
@@ -86,30 +79,6 @@ object RuntimeConfigWriter {
                     put("name", config.displayName.ifBlank { RuntimeContract.PROVIDER_NAME })
                     put("options", options)
                     put("models", models)
-                }
-            }
-            if (hasMcp) {
-                putJsonObject("mcp") {
-                    // Index must match RuntimeLaunchEnv token injection: iterate the full list.
-                    config.mcpServers.forEachIndexed { index, server ->
-                        if (!server.isValid()) return@forEachIndexed
-                        putJsonObject(server.name) {
-                            put("type", "remote")
-                            put("url", server.url.trim())
-                            put("enabled", true)
-                            if (server.token.isNotBlank()) {
-                                putJsonObject("headers") {
-                                    // Token kept out of the plaintext config via env indirection.
-                                    put("Authorization", "Bearer {env:${config.mcpTokenEnv(index)}}")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if (validPlugins.isNotEmpty()) {
-                putJsonArray("plugin") {
-                    validPlugins.forEach { add(it) }
                 }
             }
         }

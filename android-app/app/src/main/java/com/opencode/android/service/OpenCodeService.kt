@@ -122,9 +122,12 @@ class OpenCodeService : LifecycleService() {
 
     // MCP servers + plugins are managed as lists in app preferences (tokens in the secure store),
     // so they are read here at start time and merged onto the intent-derived provider config.
+    // Always export to native config so the runtime finds MCP/plugin sections in opencode.json
+    // even when syncMcpAndPluginsFromNative() detected no changes from the agent side.
     private suspend fun RuntimeProviderConfig.withMcpAndPlugins(): RuntimeProviderConfig {
         val prefs = PreferencesRepository(this@OpenCodeService)
         prefs.syncMcpAndPluginsFromNative()
+        prefs.exportMcpAndPluginsToNative()
         val servers = prefs.localMcpServers.first().map { s ->
             RuntimeMcpServer(
                 name = s.name,

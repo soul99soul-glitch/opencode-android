@@ -6,7 +6,7 @@ import java.net.Inet4Address
 
 /** Builds glibc resolv.conf content using system DNS when available. */
 internal object RuntimeDnsResolver {
-    val FALLBACK_SERVERS = listOf("223.5.5.5", "119.29.29.29", "8.8.8.8", "1.1.1.1")
+    val FALLBACK_SERVERS = listOf("8.8.8.8", "1.1.1.1", "223.5.5.5", "119.29.29.29")
 
     fun resolve(context: Context): List<String> {
         val system = readSystemDnsServers(context)

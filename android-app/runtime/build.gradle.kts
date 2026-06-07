@@ -1,7 +1,7 @@
 import java.util.concurrent.TimeUnit
 
 plugins {
-    alias(libs.plugins.android.application)
+    alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -10,11 +10,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.opencode.android.runtime"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
     }
 
     buildTypes {
