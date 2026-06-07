@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.OpenCodeApi
 import com.opencode.android.data.model.*
 import com.opencode.android.data.repository.PreferencesRepository
+import com.opencode.android.runtime.RuntimeCompanionClient
 import com.opencode.android.ui.component.*
 import com.opencode.android.ui.screen.chat.ChatStateHolder
 import com.opencode.android.ui.theme.*
@@ -86,6 +87,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -128,6 +131,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { PreferencesRepository(context) }
+    val runtimeClient = remember { RuntimeCompanionClient(context) }
     val json = remember { Json { ignoreUnknownKeys = true; isLenient = true } }
     val c = LocalOcColors.current
 
@@ -150,6 +154,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
     var showAttachMenu by remember { mutableStateOf(false) }
     var subtaskWorkerSid by remember { mutableStateOf<String?>(null) }
+    var initialEndpointKey by remember(sessionId) { mutableStateOf<String?>(null) }
     var providers by remember { mutableStateOf<List<Provider>>(emptyList()) }
     var showModelPicker by remember { mutableStateOf(false) }
     var expandedProviderId by remember { mutableStateOf<String?>(null) }
@@ -211,18 +216,58 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
 
     fun Message.firstText(): String? = parts.firstOrNull { it.type == "text" }?.text
 
+    fun Throwable?.isLocalRuntimeConnectFailure(): Boolean {
+        val msg = this?.message.orEmpty()
+        if (!msg.contains("127.0.0.1")) return false
+        return listOf("connect timeout", "failed to connect", "connection refused", "connection timed out")
+            .any { msg.contains(it, ignoreCase = true) }
+    }
+
+    suspend fun restartLocalRuntimeForRetry(error: Throwable?, forceLocal: Boolean = false): Boolean {
+        if (!forceLocal && !error.isLocalRuntimeConnectFailure()) return false
+        if (prefs.connectionMode.first() != ConnectionMode.LOCAL_BUNDLED) return false
+        val local = prefs.localProfile.first()
+        val provider = prefs.localProviderProfile.first()
+        val providerApiKey = if (provider.hasApiKey) prefs.getLocalProviderApiKey(provider.presetId) else ""
+        val serverPassword = prefs.getOrCreateLocalServerPassword()
+        return runtimeClient.restartAndAwaitReady(
+            port = local.bundledPort,
+            workspaceName = local.workspacePath,
+            workspaceTreeUri = local.workspaceTreeUri,
+            providerProfile = provider,
+            providerApiKey = providerApiKey,
+            serverPassword = serverPassword,
+        ).isSuccess
+    }
+
     suspend fun syncServerMessagesAfterIdle() {
         delay(800)
-        val cfg = prefs.config.first()
-        val api = OpenCodeApi(cfg)
-        api.getMessages(sessionId).onSuccess { serverMsgs ->
-            chatState.onServerMessages(serverMsgs).selectedModel?.let { selectedModel = it }
+        val api = OpenCodeApi(prefs.activeEndpoint.first())
+        try {
+            api.getMessages(sessionId).onSuccess { serverMsgs ->
+                chatState.onServerMessages(serverMsgs).selectedModel?.let { selectedModel = it }
+            }
+        } finally {
+            api.close()
         }
-        api.close()
+        if (prefs.connectionMode.first() == ConnectionMode.LOCAL_BUNDLED) {
+            runCatching { prefs.syncMcpAndPluginsFromNative() }
+        }
         delay(32)
         chatState.releaseDeferredParts()
         chatState.finishSettling()
         resetStreamBuffers()
+    }
+
+    LaunchedEffect(sessionId) {
+        prefs.activeEndpoint.collect { endpoint ->
+            val initial = initialEndpointKey
+            if (initial == null) {
+                initialEndpointKey = endpoint.identityKey
+            } else if (endpoint.identityKey != initial) {
+                onBack()
+            }
+        }
     }
 
     // Throttled SSE delta flush — updates the stable assistant text part, not a separate bubble.
@@ -279,55 +324,58 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
 
     // Load messages + providers + agents + initial model
     LaunchedEffect(sessionId) {
-        val config = prefs.config.first()
-        val api = OpenCodeApi(config)
-        api.getMessages(sessionId)
-            .onSuccess { msgs ->
-                chatState.loadServerMessages(msgs.takeLast(50))
-                // Extract model from last assistant message (syncs with desktop/other clients)
-                msgs.lastOrNull { it.info.role == "assistant" }?.info?.let { info ->
-                    if (info.providerID != null && info.modelID != null) {
-                        selectedModel = ModelRef(info.providerID, info.modelID)
+        val endpoint = prefs.activeEndpoint.first()
+        val api = OpenCodeApi(endpoint)
+        try {
+            api.getMessages(sessionId)
+                .onSuccess { msgs ->
+                    chatState.loadServerMessages(msgs.takeLast(50))
+                    // Extract model from last assistant message (syncs with desktop/other clients)
+                    msgs.lastOrNull { it.info.role == "assistant" }?.info?.let { info ->
+                        if (info.providerID != null && info.modelID != null) {
+                            selectedModel = ModelRef(info.providerID, info.modelID)
+                        }
                     }
                 }
+                .onFailure { errorMsg = it.message }
+            // Fetch configured providers
+            api.fetchConfiguredProviders()
+                .onSuccess { providers = it }
+            // If no model from history, use defaults from settings
+            if (selectedModel == null) {
+                val defProvider = prefs.defaultModelProvider.first()
+                val defModel = prefs.defaultModelId.first()
+                if (defProvider.isNotBlank() && defModel.isNotBlank()) {
+                    selectedModel = ModelRef(defProvider, defModel)
+                }
             }
-            .onFailure { errorMsg = it.message }
-        // Fetch configured providers
-        api.fetchConfiguredProviders()
-            .onSuccess { providers = it }
-        // If no model from history, use defaults from settings
-        if (selectedModel == null) {
-            val defProvider = prefs.defaultModelProvider.first()
-            val defModel = prefs.defaultModelId.first()
-            if (defProvider.isNotBlank() && defModel.isNotBlank()) {
-                selectedModel = ModelRef(defProvider, defModel)
-            }
+            // Fetch available agents (primary, non-hidden only)
+            api.fetchAgents()
+                .onSuccess { allAgents ->
+                    availableAgents = allAgents
+                        .filter { it.mode == "primary" && !it.hidden }
+                        .sortedWith(compareBy(::primaryAgentRank, AgentInfo::name))
+                    allKnownAgents = allAgents.filter { !it.hidden && it.mode != "primary" }
+                    if (selectedAgent == null || availableAgents.none { it.name == selectedAgent }) {
+                        val defaultAgent = prefs.defaultAgent.first().ifBlank { "build" }
+                        selectedAgent = when {
+                            availableAgents.any { it.name == defaultAgent } -> defaultAgent
+                            availableAgents.any { it.name == "build" } -> "build"
+                            else -> availableAgents.firstOrNull()?.name
+                        }
+                    }
+                }
+                .onFailure {
+                    availableAgents = StandardPrimaryAgents.map { AgentInfo(name = it) }
+                    if (selectedAgent == null) selectedAgent = "build"
+                }
+            // Fetch skills for / command autocomplete
+            api.fetchSkills()
+                .onSuccess { skills = it }
+        } finally {
+            api.close()
+            isLoading = false
         }
-        // Fetch available agents (primary, non-hidden only)
-        api.fetchAgents()
-            .onSuccess { allAgents ->
-                availableAgents = allAgents
-                    .filter { it.mode == "primary" && !it.hidden }
-                    .sortedWith(compareBy(::primaryAgentRank, AgentInfo::name))
-                allKnownAgents = allAgents.filter { !it.hidden && it.mode != "primary" }
-                if (selectedAgent == null || availableAgents.none { it.name == selectedAgent }) {
-                    val defaultAgent = prefs.defaultAgent.first().ifBlank { "build" }
-                    selectedAgent = when {
-                        availableAgents.any { it.name == defaultAgent } -> defaultAgent
-                        availableAgents.any { it.name == "build" } -> "build"
-                        else -> availableAgents.firstOrNull()?.name
-                    }
-                }
-            }
-            .onFailure {
-                availableAgents = StandardPrimaryAgents.map { AgentInfo(name = it) }
-                if (selectedAgent == null) selectedAgent = "build"
-            }
-        // Fetch skills for / command autocomplete
-        api.fetchSkills()
-            .onSuccess { skills = it }
-        isLoading = false
-        api.close()
     }
 
     // Scroll to bottom after messages load — reversed layout: index 0 = newest
@@ -342,8 +390,17 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
 
     // SSE events
     LaunchedEffect(sessionId) {
-        prefs.config.flatMapLatest { config ->
-            OpenCodeApi(config).sessionEvents()
+        prefs.activeEndpoint.flatMapLatest { endpoint ->
+            val api = OpenCodeApi(endpoint)
+            api.sessionEvents()
+                .retryWhen { cause, _ ->
+                    if (endpoint.mode == ConnectionMode.LOCAL_BUNDLED && cause.isLocalRuntimeConnectFailure()) {
+                        restartLocalRuntimeForRetry(cause)
+                    }
+                    delay(1_000)
+                    true
+                }
+                .onCompletion { api.close() }
         }.collect { eventData ->
             try {
                 val obj = json.parseToJsonElement(eventData).jsonObject
@@ -382,32 +439,38 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             delay(500)
             if (!isSending) break
             try {
-                val cfg = prefs.config.first()
-                val api = OpenCodeApi(cfg)
-                val result = api.getMessages(sessionId)
-                result.onSuccess { serverMsgs ->
-                    val latestAssistant = serverMsgs.lastOrNull { it.info.role == "assistant" }
-                    val sig = serverMsgs.joinToString("|") { it.info.id } + "_" +
-                        (latestAssistant?.parts?.size ?: 0) + "_" +
-                        latestAssistant?.firstText().orEmpty().length
-                    if (sig != lastServerIds) {
-                        lastServerIds = sig
-                        lastChangeAt = System.currentTimeMillis()
-                        if (flushedSseText.isEmpty()) {
-                            latestAssistant?.firstText()?.takeIf { it.isNotBlank() }?.let { text ->
-                                markSseTextFlushed(text)
-                                chatState.onStreamDeltaFlush(text)
+                val api = OpenCodeApi(prefs.activeEndpoint.first())
+                try {
+                    val result = api.getMessages(sessionId)
+                    result.onSuccess { serverMsgs ->
+                        val latestAssistant = serverMsgs.lastOrNull { it.info.role == "assistant" }
+                        val sig = serverMsgs.joinToString("|") { it.info.id } + "_" +
+                            (latestAssistant?.parts?.size ?: 0) + "_" +
+                            latestAssistant?.firstText().orEmpty().length
+                        if (sig != lastServerIds) {
+                            lastServerIds = sig
+                            lastChangeAt = System.currentTimeMillis()
+                            if (flushedSseText.isEmpty()) {
+                                latestAssistant?.firstText()?.takeIf { it.isNotBlank() }?.let { text ->
+                                    markSseTextFlushed(text)
+                                    chatState.onStreamDeltaFlush(text)
+                                }
                             }
                         }
                     }
+                } finally {
+                    api.close()
                 }
-                api.close()
             } catch (_: Exception) {}
             // No change for 20s while sending → assume server is idle
             if (System.currentTimeMillis() - lastChangeAt > 20_000 && isSending) {
+                val hadNoOutput = sseBuffer.isEmpty() && flushedSseText.isEmpty()
                 isSending = false
                 chatState.onCompleted()
                 scope.launch { syncServerMessagesAfterIdle() }
+                if (hadNoOutput) {
+                    errorMsg = "No response received — server may have failed to process the prompt"
+                }
             }
         }
     }
@@ -630,17 +693,20 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         } else {
                                             // Lazy lookup: find subtask session by known patterns
                                             scope.launch {
-                                                val api = OpenCodeApi(prefs.config.first())
-                                                val sessions = api.listSessions().getOrNull() ?: emptyList()
-                                                // Pattern 1: "Subtask worker from $sessionId" (old format)
-                                                // Pattern 2: title containing "(@agent subagent)" (new format)
-                                                val found = sessions.firstOrNull { s ->
-                                                    s.id != sessionId && (
-                                                        s.title.startsWith("Subtask worker from $sessionId") ||
-                                                            (s.title.contains("(@") && s.title.contains("subagent)"))
-                                                    )
-                                                }?.id
-                                                api.close()
+                                                val api = OpenCodeApi(prefs.activeEndpoint.first())
+                                                val found = try {
+                                                    val sessions = api.listSessions().getOrNull() ?: emptyList()
+                                                    // Pattern 1: "Subtask worker from $sessionId" (old format)
+                                                    // Pattern 2: title containing "(@agent subagent)" (new format)
+                                                    sessions.firstOrNull { s ->
+                                                        s.id != sessionId && (
+                                                            s.title.startsWith("Subtask worker from $sessionId") ||
+                                                                (s.title.contains("(@") && s.title.contains("subagent)"))
+                                                        )
+                                                    }?.id
+                                                } finally {
+                                                    api.close()
+                                                }
                                                 if (found != null) {
                                                     subtaskWorkerSid = found
                                                     onSubagentNavigate(found)
@@ -1028,10 +1094,12 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             ) {
                                 if (isSending) {
                                     scope.launch {
-                                        val cfg = prefs.config.first()
-                                        val api = OpenCodeApi(cfg)
-                                        api.abort(sessionId)
-                                        api.close()
+                                        val api = OpenCodeApi(prefs.activeEndpoint.first())
+                                        try {
+                                            api.abort(sessionId)
+                                        } finally {
+                                            api.close()
+                                        }
                                         isSending = false
                                         resetStreamBuffers()
                                         chatState.onAbort()
@@ -1104,9 +1172,21 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     userParts = msgParts,
                                 )
                                 scope.launch {
-                                    val cfg = prefs.config.first()
-                                    val api = OpenCodeApi(cfg)
-                                    api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
+                                    suspend fun sendOnce(): Result<Message> {
+                                        val api = OpenCodeApi(prefs.activeEndpoint.first())
+                                        return try {
+                                            api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
+                                        } finally {
+                                            api.close()
+                                        }
+                                    }
+
+                                    var result = sendOnce()
+                                    if (result.isFailure && restartLocalRuntimeForRetry(result.exceptionOrNull())) {
+                                        result = sendOnce()
+                                    }
+
+                                    result
                                         .onSuccess { msg ->
                                             // Update selected model from response
                                             msg.info.let { info ->
@@ -1116,9 +1196,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                             }
                                             // Refresh title if still placeholder
                                             if (displayTitle == "新会话") {
-                                                api.getSession(sessionId).onSuccess { s ->
-                                                    val t = s.title.substringBefore(" - ").ifBlank { s.slug }
-                                                    if (t.isNotBlank() && t != "new session") displayTitle = t
+                                                val api = OpenCodeApi(prefs.activeEndpoint.first())
+                                                try {
+                                                    api.getSession(sessionId).onSuccess { s ->
+                                                        val t = s.title.substringBefore(" - ").ifBlank { s.slug }
+                                                        if (t.isNotBlank() && t != "new session") displayTitle = t
+                                                    }
+                                                } finally {
+                                                    api.close()
                                                 }
                                             }
                                         }
@@ -1132,7 +1217,6 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                                 resetStreamBuffers()
                                             }
                                         }
-                                    api.close()
                                 }
                             },
                         contentAlignment = Alignment.Center,

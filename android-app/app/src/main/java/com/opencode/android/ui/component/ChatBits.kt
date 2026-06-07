@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -104,11 +107,21 @@ fun ToolCallRow(
 ) {
     val c = LocalOcColors.current
     var expanded by remember { mutableStateOf(false) }
-    val hasDetail = status == "done" && (!output.isNullOrBlank() || !input.isNullOrBlank())
+    val outputText = output.orEmpty()
+    val inputText = input.orEmpty()
+    val outputLines = outputText.lines().size
+    val hasDetail = outputText.isNotBlank() || inputText.isNotBlank()
+    val isLongOutput = outputLines > 6 || outputText.length > 400
     val dotColor = when (status) {
         "done" -> c.accent
         "run" -> c.accent
         else -> c.ink4
+    }
+    val detailHint = when {
+        isLongOutput -> "$outputLines lines"
+        outputText.isNotBlank() -> "${outputText.length} chars"
+        inputText.isNotBlank() -> "input"
+        else -> null
     }
 
     Column(
@@ -136,6 +149,9 @@ fun ToolCallRow(
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (!expanded && detailHint != null) {
+                Text(detailHint, style = OcType.mono.copy(fontSize = 10.sp), color = c.ink4)
+            }
             if (status == "done" && !hasDetail) {
                 // Static checkmark
                 Canvas(Modifier.size(13.dp)) {
@@ -165,32 +181,35 @@ fun ToolCallRow(
             if (status == "run") OnlineDot()
         }
 
-        // Expanded detail
+        // Expanded detail — default collapsed; scroll long bash/log output
         if (hasDetail) {
             AnimatedVisibility(
                 visible = expanded,
                 enter = fadeIn(tween(200)) + expandVertically(tween(200)),
                 exit = fadeOut(tween(120)) + shrinkVertically(tween(120)),
             ) {
+                val scroll = rememberScrollState()
                 Column(
                     Modifier
                         .background(c.codeBg.copy(alpha = 0.5f), SuperellipseShape(8.dp, 4f))
-                        .padding(horizontal = 13.dp, vertical = 9.dp),
+                        .padding(horizontal = 13.dp, vertical = 9.dp)
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(scroll),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    if (!input.isNullOrBlank()) {
+                    if (inputText.isNotBlank()) {
                         SelectionContainer {
-                            Text(input.take(2000), style = OcType.mono.copy(lineHeight = 18.sp), color = c.ink2)
+                            Text(inputText.take(4000), style = OcType.mono.copy(lineHeight = 18.sp), color = c.ink2)
                         }
                     }
-                    if (!input.isNullOrBlank() && !output.isNullOrBlank()) {
+                    if (inputText.isNotBlank() && outputText.isNotBlank()) {
                         Hairline()
                     }
-                    if (!output.isNullOrBlank()) {
+                    if (outputText.isNotBlank()) {
                         SelectionContainer {
                             Text(
-                                output.take(2000),
-                                style = OcType.mono.copy(lineHeight = 18.sp),
+                                outputText.take(12_000),
+                                style = OcType.mono.copy(lineHeight = 18.sp, fontSize = 11.sp),
                                 color = c.ink3,
                             )
                         }

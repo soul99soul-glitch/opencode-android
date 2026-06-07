@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "OpenCode"
 include(":app")
+include(":runtime")

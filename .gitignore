@@ -9,6 +9,12 @@ android-app/local.properties
 android-app/.idea/
 *.iml
 
+# Runtime companion local payloads are generated/downloaded for APK packaging.
+# They are too large for source control; use android-app/runtime/tools/import-opencode-runtime.sh.
+android-app/runtime/src/main/jniLibs/
+android-app/runtime/src/main/assets/runtime_support/
+android-app/runtime/.work/
+
 # ========================================================
 # Binary build artifacts
 # ========================================================

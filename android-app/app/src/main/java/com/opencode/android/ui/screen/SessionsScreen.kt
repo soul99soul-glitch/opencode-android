@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -35,14 +36,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.OpenCodeApi
-import com.opencode.android.data.model.ServerConfig
+import com.opencode.android.data.model.ActiveEndpoint
+import com.opencode.android.data.model.ConnectionMode
 import com.opencode.android.data.model.Session
 import com.opencode.android.data.repository.PreferencesRepository
+import com.opencode.android.runtime.RuntimeCompanionClient
 import com.opencode.android.ui.component.*
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcButtonShape
 import com.opencode.android.ui.theme.OcType
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 import java.util.*
@@ -53,51 +57,131 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     val scope = rememberCoroutineScope()
     val prefs = remember { PreferencesRepository(context) }
     val c = LocalOcColors.current
+    val runtimeClient = remember { RuntimeCompanionClient(context) }
 
     var sessions by remember { mutableStateOf<List<Session>>(emptyList()) }
     var sessionPreviews by remember { mutableStateOf<Map<String, Pair<String?, Int>>>(emptyMap()) }
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var isCreating by remember { mutableStateOf(false) }
-    var hostPort by remember { mutableStateOf("127.0.0.1:4096") }
-    val config by prefs.config.collectAsState(initial = ServerConfig())
+    var hostPort by remember { mutableStateOf("loading") }
+    val endpoint by prefs.activeEndpoint.collectAsState(initial = null)
+    var refreshJob by remember { mutableStateOf<Job?>(null) }
 
-    suspend fun createNewSession() {
-        if (isCreating) return
-        isCreating = true
-        val api = OpenCodeApi(config)
-        api.createSession()
-            .onSuccess { session ->
-                val t = session.title.substringBefore(" - ").ifBlank { session.slug }
-                onSessionClick(session.id, t)
-            }
-            .onFailure { error = it.message }
-        api.close()
-        isCreating = false
+    fun Throwable?.isLocalRuntimeConnectFailure(): Boolean {
+        val msg = this?.message.orEmpty()
+        if (!msg.contains("127.0.0.1")) return false
+        return listOf("connect timeout", "failed to connect", "connection refused", "connection timed out")
+            .any { msg.contains(it, ignoreCase = true) }
     }
 
-    fun refresh(configOverride: ServerConfig = config) {
-        scope.launch {
-            isLoading = true
-            val cfg = configOverride
-            hostPort = if (cfg.host.startsWith("http://") || cfg.host.startsWith("https://"))
-                cfg.host.trimEnd('/') else "${cfg.host}:${cfg.port}"
-            val api = OpenCodeApi(cfg)
-            api.listSessions()
+    suspend fun ensureBundledRuntimeReady(active: ActiveEndpoint, restart: Boolean): Boolean {
+        if (active.mode != ConnectionMode.LOCAL_BUNDLED) return true
+        val local = prefs.localProfile.first()
+        val providerProfile = prefs.localProviderProfile.first()
+        val providerApiKey = if (providerProfile.hasApiKey) prefs.getLocalProviderApiKey(providerProfile.presetId) else ""
+        val serverPassword = prefs.getOrCreateLocalServerPassword()
+        val result = if (restart) {
+            runtimeClient.restartAndAwaitReady(
+                port = local.bundledPort,
+                workspaceName = local.workspacePath,
+                workspaceTreeUri = local.workspaceTreeUri,
+                providerProfile = providerProfile,
+                providerApiKey = providerApiKey,
+                serverPassword = serverPassword,
+            )
+        } else {
+            runtimeClient.startAndAwaitReady(
+                port = local.bundledPort,
+                workspaceName = local.workspacePath,
+                workspaceTreeUri = local.workspaceTreeUri,
+                providerProfile = providerProfile,
+                providerApiKey = providerApiKey,
+                serverPassword = serverPassword,
+            )
+        }
+        result.onFailure { error = it.message ?: "Local runtime failed to start" }
+        return result.isSuccess
+    }
+
+    suspend fun createSessionOnce(active: ActiveEndpoint): Result<Session> {
+        val api = OpenCodeApi(active)
+        return try {
+            api.createSession()
+        } finally {
+            api.close()
+        }
+    }
+
+    suspend fun createNewSession() {
+        val active = endpoint ?: return
+        if (isCreating) return
+        isCreating = true
+        try {
+            if (!ensureBundledRuntimeReady(active, restart = false)) return
+            var result = createSessionOnce(active)
+            if (result.exceptionOrNull().isLocalRuntimeConnectFailure() && ensureBundledRuntimeReady(active, restart = true)) {
+                result = createSessionOnce(active)
+            }
+            result
+                .onSuccess { session ->
+                    val t = session.title.substringBefore(" - ").ifBlank { session.slug }
+                    onSessionClick(session.id, t)
+                }
+                .onFailure { error = it.message }
+        } finally {
+            isCreating = false
+        }
+    }
+
+    suspend fun refreshNow(active: ActiveEndpoint) {
+        val refreshKey = active.identityKey
+        isLoading = true
+        hostPort = active.displayUrl
+        if (!ensureBundledRuntimeReady(active, restart = false)) {
+            if (endpoint?.identityKey == refreshKey) isLoading = false
+            return
+        }
+        val api = OpenCodeApi(active)
+        try {
+            var listResult = api.listSessions()
+            if (listResult.exceptionOrNull().isLocalRuntimeConnectFailure() && ensureBundledRuntimeReady(active, restart = true)) {
+                listResult = api.listSessions()
+            }
+            listResult
                 .onSuccess { list ->
+                    if (endpoint?.identityKey != refreshKey) return@onSuccess
                     // Filter out subagent worker sessions (not parent tasks)
                     val subagentPattern = """(.*\(@\w+ subagent\).*)|(^Subtask worker .*$)""".toRegex()
                     sessions = list.filter { !subagentPattern.matches(it.title) }
                     error = null
-                    sessionPreviews = api.enrichSessions(sessions)
+                    val currentSessions = sessions
+                    val previews = api.enrichSessions(currentSessions)
+                    if (endpoint?.identityKey == refreshKey) {
+                        sessionPreviews = previews
+                    }
                 }
-                .onFailure { error = it.message }
+                .onFailure {
+                    if (endpoint?.identityKey == refreshKey) error = it.message
+                }
+        } finally {
             api.close()
-            isLoading = false
+            if (endpoint?.identityKey == refreshKey) isLoading = false
         }
     }
 
-    LaunchedEffect(config) { refresh(config) }
+    LaunchedEffect(endpoint?.identityKey) {
+        sessions = emptyList()
+        sessionPreviews = emptyMap()
+        error = null
+        val active = endpoint
+        if (active == null) {
+            isLoading = true
+            hostPort = "loading"
+        } else {
+            refreshNow(active)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
@@ -114,7 +198,12 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                 var refreshRotation by remember { mutableFloatStateOf(0f) }
                 val rotation by animateFloatAsState(targetValue = refreshRotation, animationSpec = tween(600), label = "refresh")
                 Box(
-                    Modifier.size(44.dp).pressable { refreshRotation += 360f; refresh() },
+                    Modifier.size(44.dp).pressable {
+                        refreshRotation += 360f
+                        val active = endpoint ?: return@pressable
+                        refreshJob?.cancel()
+                        refreshJob = scope.launch { refreshNow(active) }
+                    },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -185,7 +274,11 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                         Spacer(Modifier.height(16.dp))
                         Box(
                             Modifier
-                                .pressable { refresh() }
+                                .pressable {
+                                    val active = endpoint ?: return@pressable
+                                    refreshJob?.cancel()
+                                    refreshJob = scope.launch { refreshNow(active) }
+                                }
                                 .background(c.accent, OcButtonShape)
                                 .padding(horizontal = 24.dp, vertical = 12.dp)
                         ) {
@@ -232,11 +325,13 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                                         .background(Color(0xFFE53935))
                                         .pressable {
                                             scope.launch {
-                                                val cfg = prefs.config.first()
-                                                val api = OpenCodeApi(cfg)
-                                                api.deleteSession(session.id)
-                                                api.close()
-                                                sessions = sessions.filter { it.id != session.id }
+                                                val api = OpenCodeApi(prefs.activeEndpoint.first())
+                                                try {
+                                                    api.deleteSession(session.id)
+                                                    sessions = sessions.filter { it.id != session.id }
+                                                } finally {
+                                                    api.close()
+                                                }
                                             }
                                         },
                                     contentAlignment = Alignment.Center,
@@ -328,7 +423,7 @@ private fun relativeTime(epochMs: Long): String {
         diff < 172800     -> "昨天"
         diff < 604800     -> "${diff / 86400}天前"
         else              -> {
-            val sdf = java.text.SimpleDateFormat("M月d日", java.util.Locale.getDefault())
+            val sdf = java.text.SimpleDateFormat("M月d日", LocalLocale.current.platformLocale)
             sdf.format(java.util.Date(epochMs))
         }
     }

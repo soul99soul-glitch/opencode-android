@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">127.0.0.1</domain>
-        <domain includeSubdomains="true">10.0.0.0</domain>
-        <domain includeSubdomains="true">192.168.0.0</domain>
-        <domain includeSubdomains="true">172.16.0.0</domain>
-        <domain includeSubdomains="true">localhost</domain>
-    </domain-config>
+    <!--
+        Android network-security-config cannot express RFC1918 CIDR ranges.
+        LAN mode accepts user-entered private IPs, so platform cleartext stays
+        available and OpenCodeApi/LocalProviderModelFetcher reject public HTTP
+        before sending prompts, auth headers, or provider API keys.
+    -->
     <base-config cleartextTrafficPermitted="true" />
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">github.com</domain>
+        <domain includeSubdomains="true">githubusercontent.com</domain>
+        <domain includeSubdomains="true">objects.githubusercontent.com</domain>
+    </domain-config>
 </network-security-config>

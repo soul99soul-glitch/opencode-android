@@ -40,4 +40,23 @@ class OpenCodeApiErrorTest {
             formatHttpError(401, ""),
         )
     }
+
+    @Test
+    fun nestedProviderErrorExtractsMessage() {
+        val body = """
+            {
+              "error": {
+                "message": "Invalid API Key",
+                "param": "Please provide valid API Key",
+                "code": "401",
+                "type": "invalid_key"
+              }
+            }
+        """.trimIndent()
+
+        assertEquals(
+            "Authentication failed (HTTP 401): Invalid API Key",
+            formatHttpError(401, body),
+        )
+    }
 }

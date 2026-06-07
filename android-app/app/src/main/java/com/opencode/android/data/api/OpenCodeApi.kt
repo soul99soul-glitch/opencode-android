@@ -19,12 +19,34 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
 
-class OpenCodeApi(config: ServerConfig) {
+class OpenCodeApi private constructor(
+    private val baseUrl: String,
+    password: String,
+    directory: String,
+) {
+
+    constructor(config: ServerConfig) : this(
+        baseUrl = when {
+            config.host.startsWith("http://") || config.host.startsWith("https://") ->
+                config.host.trimEnd('/')
+            else ->
+                "http://${config.host}:${config.port}"
+        },
+        password = config.password,
+        directory = config.directory,
+    )
+
+    constructor(endpoint: ActiveEndpoint) : this(
+        baseUrl = endpoint.baseUrl.trimEnd('/'),
+        password = endpoint.password,
+        directory = endpoint.directory,
+    )
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -33,19 +55,14 @@ class OpenCodeApi(config: ServerConfig) {
         encodeDefaults = true
     }
 
-    private val baseUrl = when {
-        config.host.startsWith("http://") || config.host.startsWith("https://") ->
-            config.host.trimEnd('/')  // Full URL — use as-is
-        else ->
-            "http://${config.host}:${config.port}"  // Legacy host:port — auto HTTP
-    }
-
-    private val authHeader = if (config.password.isNotBlank()) {
-        val cred = Base64.getEncoder().encodeToString("opencode:${config.password}".toByteArray())
+    private val authHeader = if (password.isNotBlank()) {
+        val cred = Base64.getEncoder().encodeToString("opencode:$password".toByteArray())
         "Basic $cred"
     } else null
 
-    private val directoryHeader = config.directory.takeIf { it.isNotBlank() }
+    private val blockedCleartextMessage = publicCleartextBlockMessage(baseUrl)
+
+    private val directoryHeader = directory.takeIf { it.isNotBlank() }
 
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(json) }
@@ -74,7 +91,12 @@ class OpenCodeApi(config: ServerConfig) {
         }
     }
 
+    private fun ensureCleartextAllowed() {
+        blockedCleartextMessage?.let { throw IllegalStateException(it) }
+    }
+
     private suspend inline fun <reified T> safeRequest(request: suspend () -> HttpResponse): Result<T> = runCatching {
+        ensureCleartextAllowed()
         val response = request()
         if (response.status.value in 200..299) {
             response.body<T>()
@@ -113,6 +135,7 @@ class OpenCodeApi(config: ServerConfig) {
     }
 
     suspend fun fetchProjectRootFiles(directory: String): Result<List<RemoteFileEntry>> = runCatching {
+        ensureCleartextAllowed()
         val response = client.get("$baseUrl/file") {
             header("x-opencode-directory", directory)
             parameter("directory", directory)
@@ -141,6 +164,7 @@ class OpenCodeApi(config: ServerConfig) {
     }
 
     suspend fun deleteSession(sessionId: String): Result<HttpResponse> = runCatching {
+        ensureCleartextAllowed()
         client.delete("$baseUrl/session/$sessionId")
     }
 
@@ -178,19 +202,55 @@ class OpenCodeApi(config: ServerConfig) {
         }
     }
 
-    /** Send prompt — API returns the assistant message synchronously in response body */
+    /**
+     * Send prompt to the session.
+     *
+     * For local async runtimes: the server accepts the prompt via POST and processes it
+     * asynchronously — real-time assistant output arrives via SSE `message.part.delta`
+     * events, and completion is signalled by `session.status=completed`. The POST response
+     * body may contain a streaming/chunked payload that can break if the connection is
+     * interrupted. When the body cannot be read but the HTTP status is 2xx, a placeholder
+     * [Message] (with blank id) is returned so callers can proceed; actual content arrives
+     * via SSE/polling.
+     *
+     * For remote servers: the full response body is expected and read synchronously.
+     * Stream breaks are propagated as failures.
+     */
     suspend fun sendPrompt(sessionId: String, parts: List<PromptPart>, agent: String? = null, model: ModelRef? = null): Result<Message> = runCatching {
-        val response = client.post("$baseUrl/session/$sessionId/message") {
+        ensureCleartextAllowed()
+        val response = longPollClient.post("$baseUrl/session/$sessionId/message") {
             contentType(ContentType.Application.Json)
             setBody(PromptRequest(parts = parts, agent = agent, model = model))
         }
         if (response.status.value in 200..299) {
-            val raw = response.bodyAsText()
-            // Check if server returned HTML error page instead of JSON
+            val local = isLocalOrPrivateHost(runCatching { URL(baseUrl).host }.getOrDefault(""))
+            val raw = try {
+                response.bodyAsText()
+            } catch (e: Exception) {
+                // Local async runtime: stream break after 2xx is not a failure —
+                // prompt was accepted, SSE/polling carries the real output.
+                // Catch broadly (Exception) because Ktor 3.x may throw
+                // kotlinx.io.IOException instead of java.io.IOException.
+                if (!local) throw e
+                null
+            }
+            if (raw == null) {
+                // Local: body stream broke — return placeholder (blank id = not a real message).
+                return@runCatching Message(
+                    info = MessageInfo(id = "", role = "assistant"),
+                    parts = emptyList()
+                )
+            }
             if (raw.trimStart().startsWith("<!DOCTYPE") || raw.trimStart().startsWith("<html")) {
                 throw Exception("Server returned HTML (${response.status.value})")
             }
             if (raw.isBlank()) {
+                if (local) {
+                    return@runCatching Message(
+                        info = MessageInfo(id = "", role = "assistant"),
+                        parts = emptyList()
+                    )
+                }
                 throw Exception("Server returned empty response (${response.status.value})")
             }
             json.decodeFromString<Message>(raw)
@@ -201,53 +261,110 @@ class OpenCodeApi(config: ServerConfig) {
     }
 
     suspend fun abort(sessionId: String): Result<HttpResponse> = runCatching {
+        ensureCleartextAllowed()
         longPollClient.post("$baseUrl/session/$sessionId/abort")
     }
 
-    /** Fetch available providers (only configured ones, source=config) */
+    /** Fetch available providers (only configured ones, source=config). */
     suspend fun fetchConfiguredProviders(): Result<List<Provider>> = runCatching {
-        val response = client.get("$baseUrl/provider")
-        if (response.status.value !in 200..299) {
-            throw Exception("HTTP ${response.status.value}")
-        }
-        val body = response.body<ProviderResponse>()
-        body.all.filter { it.source == "config" }
+        ensureCleartextAllowed()
+        fetchConfiguredProvidersFromServer(client, baseUrl, json)
     }
 
     /**
      * SSE via raw HttpURLConnection — uses callbackFlow for safe cross-dispatcher emission.
      */
-    fun sessionEvents(): Flow<String> = callbackFlow {
-        val url = URL("$baseUrl/event")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("Accept", "text/event-stream")
-            setRequestProperty("Cache-Control", "no-cache")
-            authHeader?.let { setRequestProperty("Authorization", it) }
-            directoryHeader?.let { setRequestProperty("x-opencode-directory", it) }
-            connectTimeout = 10_000
-            readTimeout = 0
+    fun sessionEvents(): Flow<String> {
+        blockedCleartextMessage?.let { message ->
+            return flow { throw IllegalStateException(message) }
         }
-        try {
-            val reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val l = line ?: continue
-                if (l.startsWith("data: ")) {
-                    val data = l.removePrefix("data: ")
-                    if (data.isNotBlank()) trySend(data)
+        return callbackFlow {
+            val conn = (URL("$baseUrl/event").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Accept", "text/event-stream")
+                setRequestProperty("Cache-Control", "no-cache")
+                authHeader?.let { setRequestProperty("Authorization", it) }
+                directoryHeader?.let { setRequestProperty("x-opencode-directory", it) }
+                connectTimeout = 10_000
+                readTimeout = 0
+            }
+
+            val readerJob = launch(Dispatchers.IO) {
+                var reader: BufferedReader? = null
+                var closeCause: Throwable? = null
+                try {
+                    reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
+                    while (isActive) {
+                        val line = runInterruptible { reader.readLine() }
+                        if (line == null) {
+                            closeCause = IOException("SSE connection closed")
+                            break
+                        }
+                        if (line.startsWith("data: ")) {
+                            val data = line.removePrefix("data: ")
+                            if (data.isNotBlank() && trySend(data).isFailure) break
+                        }
+                    }
+                } catch (_: CancellationException) {
+                    // expected on close
+                } catch (e: Exception) {
+                    closeCause = e
+                } finally {
+                    try { reader?.close() } catch (_: Exception) {}
+                    conn.disconnect()
+                    channel.close(closeCause)
                 }
             }
-        } catch (_: CancellationException) {
-            // expected on close
-        } catch (_: Exception) {
-            // connection ended or errored
-        } finally {
-            conn.disconnect()
-            close()
+
+            awaitClose {
+                conn.disconnect()
+                readerJob.cancel()
+            }
         }
-        awaitClose { conn.disconnect() }
-    }.flowOn(Dispatchers.IO)
+    }
 
     fun close() { client.close(); longPollClient.close() }
+
+    companion object {
+        internal suspend fun fetchConfiguredProvidersFromServer(
+            client: HttpClient,
+            baseUrl: String,
+            json: Json,
+        ): List<Provider> {
+            val configProviders = runCatching {
+                val response = client.get("$baseUrl/config/providers")
+                if (response.status.value !in 200..299) throw Exception("HTTP ${response.status.value}")
+                parseConfigProvidersResponse(response.bodyAsText(), json)
+            }.getOrNull()
+            if (configProviders != null) {
+                return configProviders
+            }
+
+            val legacyResponse = client.get("$baseUrl/provider")
+            if (legacyResponse.status.value !in 200..299) {
+                throw Exception("HTTP ${legacyResponse.status.value}")
+            }
+            return parseLegacyProviderResponse(legacyResponse.bodyAsText(), json)
+        }
+
+        internal fun publicCleartextBlockMessage(baseUrl: String): String? {
+            if (!baseUrl.startsWith("http://")) return null
+            val host = runCatching { URL(baseUrl).host }.getOrDefault("")
+            return if (isLocalOrPrivateHost(host)) {
+                null
+            } else {
+                "Refusing public HTTP endpoint; use HTTPS or a local/private address"
+            }
+        }
+
+        internal fun isLocalOrPrivateHost(host: String): Boolean {
+            val h = host.trim('[', ']').lowercase()
+            if (h == "localhost" || h == "::1" || h.endsWith(".local") || h.endsWith(".lan")) return true
+            if (h.startsWith("127.")) return true
+            if (h.startsWith("10.")) return true
+            if (h.startsWith("192.168.")) return true
+            val parts = h.split('.').mapNotNull { it.toIntOrNull() }
+            return parts.size == 4 && parts[0] == 172 && parts[1] in 16..31
+        }
+    }
 }

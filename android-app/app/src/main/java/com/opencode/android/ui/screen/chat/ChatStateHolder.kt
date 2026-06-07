@@ -41,6 +41,8 @@ data class ChatDisplayPart(
     val tool: String? = null,
     val callID: String? = null,
     val state: ToolState? = null,
+    /** Original index in the server message `parts` list — drives render order. */
+    val sourceOrder: Int = Int.MAX_VALUE,
 )
 
 data class LocalSendResult(
@@ -117,7 +119,9 @@ class ChatStateHolder(
                 sessionID = sessionId,
                 agent = sendAgent,
                 phase = MessagePhase.Streaming,
-                visibleParts = listOf(ChatDisplayPart(renderId = TEXT_PART_RENDER_ID, type = "text", text = "")),
+                visibleParts = listOf(
+                    ChatDisplayPart(renderId = TEXT_PART_RENDER_ID, type = "text", text = "", sourceOrder = Int.MAX_VALUE),
+                ),
             )
         )
 
@@ -224,7 +228,7 @@ class ChatStateHolder(
             val msg = messages[idx]
             if (msg.deferredParts.isNotEmpty()) {
                 messages[idx] = msg.copy(
-                    visibleParts = mergePartsByRenderId(msg.visibleParts, msg.deferredParts),
+                    visibleParts = (msg.visibleParts + msg.deferredParts).sortedBy { it.sourceOrder },
                     deferredParts = emptyList(),
                 )
             }
@@ -261,20 +265,14 @@ class ChatStateHolder(
         val localAssistantId = activeLocalAssistantId ?: return false
         consumedServerMessageIds += serverAssistant.info.id
         updateMessage(localAssistantId) { msg ->
-            val serverText = serverAssistant.combinedText()
-            val visible = if (serverText.isBlank()) {
-                msg.visibleParts
+            val allParts = serverAssistant.parts.toDisplayParts(includeEmptyText = false)
+            val deferredParts = allParts.filter { it.type in DEFERRED_PART_TYPES }
+            val immediateParts = allParts.filter { it.type !in DEFERRED_PART_TYPES }
+            val visibleParts = if (serverAssistant.combinedText().isBlank() && msg.phase == MessagePhase.Streaming) {
+                mergePartsByRenderId(msg.visibleParts, immediateParts).sortedBy { it.sourceOrder }
             } else {
-                msg.visibleParts.withStableText(serverText)
+                immediateParts.sortedBy { it.sourceOrder }
             }
-            val reasoningParts = serverAssistant.parts.toDisplayParts(
-                includeEmptyText = false,
-                allowTypes = setOf("reasoning", "file", "image"),
-            )
-            val deferredParts = serverAssistant.parts.toDisplayParts(
-                includeEmptyText = false,
-                allowTypes = setOf("tool", "tool-invocation", "tool-result", "step-start", "step-finish"),
-            )
 
             msg.copy(
                 serverId = serverAssistant.info.id,
@@ -283,8 +281,8 @@ class ChatStateHolder(
                 providerID = serverAssistant.info.providerID ?: msg.providerID,
                 modelID = serverAssistant.info.modelID ?: msg.modelID,
                 phase = MessagePhase.Settling,
-                visibleParts = mergePartsByRenderId(visible, reasoningParts),
-                deferredParts = mergePartsByRenderId(msg.deferredParts, deferredParts),
+                visibleParts = visibleParts,
+                deferredParts = mergePartsByRenderId(msg.deferredParts, deferredParts).sortedBy { it.sourceOrder },
             )
         }
         return true
@@ -345,7 +343,9 @@ class ChatStateHolder(
                 if (index == textIndex) item.copy(text = text) else item
             }
         }
-        return listOf(ChatDisplayPart(renderId = TEXT_PART_RENDER_ID, type = "text", text = text)) + this
+        return listOf(
+            ChatDisplayPart(renderId = TEXT_PART_RENDER_ID, type = "text", text = text, sourceOrder = Int.MAX_VALUE),
+        ) + this
     }
 
     private fun List<MessagePart>.toDisplayParts(
@@ -353,11 +353,11 @@ class ChatStateHolder(
         allowTypes: Set<String>? = null,
     ): List<ChatDisplayPart> {
         val counters = mutableMapOf<String, Int>()
-        return mapNotNull { part ->
-            if (allowTypes != null && part.type !in allowTypes) return@mapNotNull null
+        return mapIndexedNotNull { index, part ->
+            if (allowTypes != null && part.type !in allowTypes) return@mapIndexedNotNull null
             val ordinal = counters.getOrDefault(part.type, 0)
             counters[part.type] = ordinal + 1
-            part.toDisplayPart(ordinal, includeEmptyText)
+            part.toDisplayPart(ordinal, includeEmptyText)?.copy(sourceOrder = index)
         }
     }
 
@@ -421,7 +421,7 @@ class ChatStateHolder(
                 result.add(part)
             }
         }
-        return result
+        return result.sortedBy { it.sourceOrder }
     }
 
     private fun renderIdFor(type: String, ordinal: Int, id: String?, callID: String?): String {

@@ -1,0 +1,294 @@
+package com.opencode.android.service
+
+import com.opencode.android.data.model.McpConfigSource
+import com.opencode.android.data.model.McpServerConfig
+import com.opencode.android.data.model.parsePluginSpecs
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import java.io.File
+
+/** Reads and writes MCP / plugin sections in the agent-native opencode config directory. */
+object OpenCodeNativeConfigSync {
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
+
+    private val CONFIG_FILENAMES = listOf("opencode.json", "config.json", "opencode.jsonc")
+    private val DEFAULT_PLUGIN_PACKAGE = "@opencode-ai/plugin"
+    private val INTERNAL_PACKAGE_DEPS = setOf(DEFAULT_PLUGIN_PACKAGE, "@opencode-ai/sdk")
+    private val BEARER_PREFIX = Regex("^Bearer\\s+(.+)$", RegexOption.IGNORE_CASE)
+
+    data class NativeSnapshot(
+        val mcpServers: List<ImportedMcpServer> = emptyList(),
+        val plugins: List<String> = emptyList(),
+        val defaultPluginPackagePresent: Boolean = false,
+    )
+
+    data class ImportedMcpServer(
+        val name: String,
+        val url: String,
+        val token: String? = null,
+        val hasToken: Boolean = false,
+    )
+
+    fun nativeConfigDir(filesDir: File): File = File(filesDir, ".config/opencode")
+
+    fun read(filesDir: File): NativeSnapshot {
+        val mcpByName = linkedMapOf<String, ImportedMcpServer>()
+        val plugins = linkedSetOf<String>()
+
+        CONFIG_FILENAMES.forEach { filename ->
+            val file = File(nativeConfigDir(filesDir), filename)
+            if (!file.exists()) return@forEach
+            val allowComments = filename.endsWith(".jsonc")
+            val root = runCatching { parseRoot(file.readText(), allowComments) }.getOrNull() ?: return@forEach
+            parseMcpSection(root).forEach { entry -> mcpByName[entry.name] = entry }
+            parsePluginSection(root).forEach { plugins.add(it) }
+        }
+
+        val packagePlugins = readPackageJsonPlugins(filesDir)
+        packagePlugins.forEach { plugins.add(it) }
+
+        return NativeSnapshot(
+            mcpServers = mcpByName.values.toList(),
+            plugins = plugins.toList(),
+            defaultPluginPackagePresent = hasDefaultPluginPackage(filesDir),
+        )
+    }
+
+    fun write(
+        filesDir: File,
+        servers: List<McpServerConfig>,
+        pluginSpecs: List<String>,
+        tokensByName: Map<String, String>,
+    ): File {
+        val configDir = nativeConfigDir(filesDir)
+        configDir.mkdirs()
+        val configFile = File(configDir, "opencode.json")
+        val existing = if (configFile.exists()) {
+            runCatching { parseRoot(configFile.readText(), allowComments = false) }.getOrElse { JsonObject(emptyMap()) }
+        } else {
+            JsonObject(emptyMap())
+        }
+
+        val validServers = servers.filter { it.name.isNotBlank() && it.url.trim().startsWith("http") }
+        val validPlugins = pluginSpecs.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+        val merged = buildJsonObject {
+            existing.forEach { (key, value) ->
+                if (key != "mcp" && key != "plugin") put(key, value)
+            }
+            if (validServers.isNotEmpty()) {
+                putJsonObject("mcp") {
+                    validServers.forEachIndexed { index, server ->
+                        val token = tokensByName[server.name].orEmpty().trim()
+                        putJsonObject(server.name.trim()) {
+                            put("type", "remote")
+                            put("url", server.url.trim())
+                            put("enabled", true)
+                            if (token.isNotBlank()) {
+                                putJsonObject("headers") {
+                                    put("Authorization", "Bearer {env:OPENCODE_MCP_TOKEN_$index}")
+                                }
+                            } else if (server.hasToken) {
+                                putJsonObject("headers") {
+                                    put("Authorization", "Bearer {env:OPENCODE_MCP_TOKEN_$index}")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (validPlugins.isNotEmpty()) {
+                putJsonArray("plugin") {
+                    validPlugins.forEach { add(it) }
+                }
+            }
+        }
+
+        configFile.writeText(json.encodeToString(JsonObject.serializer(), merged))
+        return configFile
+    }
+
+    fun mergeIntoPrefs(
+        currentServers: List<McpServerConfig>,
+        currentPluginText: String,
+        currentDefaultPlugins: Boolean,
+        currentAgentPlugins: Set<String>,
+        snapshot: NativeSnapshot,
+    ): MergeResult {
+        val importedMcp = mutableListOf<String>()
+        val importedPlugins = mutableListOf<String>()
+        val appServers = currentServers
+            .filter { it.source != McpConfigSource.AGENT }
+            .associateBy { it.name }
+            .toMutableMap()
+        val mergedServers = linkedMapOf<String, McpServerConfig>()
+        mergedServers.putAll(appServers)
+
+        snapshot.mcpServers.forEach { native ->
+            if (native.name in appServers) return@forEach
+            val previous = currentServers.find { it.name == native.name }
+            val entry = McpServerConfig(
+                name = native.name,
+                url = native.url,
+                hasToken = native.hasToken || !native.token.isNullOrBlank() || previous?.hasToken == true,
+                source = McpConfigSource.AGENT,
+            )
+            if (previous == null) importedMcp += native.name
+            mergedServers[native.name] = entry
+        }
+
+        val currentPlugins = parsePluginSpecs(currentPluginText)
+        val mergedPlugins = (currentPlugins + snapshot.plugins).distinct()
+        snapshot.plugins.filter { it !in currentPlugins }.forEach { importedPlugins += it }
+        val mergedAgentPlugins = (currentAgentPlugins + importedPlugins).filter { it in mergedPlugins }.toSet()
+
+        var defaultPlugins = currentDefaultPlugins
+        var defaultPluginsChanged = false
+        if (snapshot.defaultPluginPackagePresent && !currentDefaultPlugins) {
+            defaultPlugins = true
+            defaultPluginsChanged = true
+        }
+
+        val servers = mergedServers.values.toList()
+        val serversChanged = servers != currentServers
+        val pluginsChanged = mergedPlugins != currentPlugins
+        val agentPluginsChanged = mergedAgentPlugins != currentAgentPlugins
+
+        return MergeResult(
+            servers = servers,
+            pluginText = mergedPlugins.joinToString("\n"),
+            agentPluginSpecs = mergedAgentPlugins,
+            defaultPluginsEnabled = defaultPlugins,
+            importedMcpNames = importedMcp,
+            importedPluginSpecs = importedPlugins,
+            changed = serversChanged || pluginsChanged || defaultPluginsChanged || agentPluginsChanged,
+            tokensToImport = snapshot.mcpServers
+                .mapNotNull { entry ->
+                    val token = entry.token?.trim().orEmpty()
+                    if (token.isNotBlank()) entry.name to token else null
+                }
+                .toMap(),
+        )
+    }
+
+    data class MergeResult(
+        val servers: List<McpServerConfig>,
+        val pluginText: String,
+        val agentPluginSpecs: Set<String>,
+        val defaultPluginsEnabled: Boolean,
+        val importedMcpNames: List<String>,
+        val importedPluginSpecs: List<String>,
+        val changed: Boolean,
+        val tokensToImport: Map<String, String>,
+    )
+
+    private fun parseRoot(raw: String, allowComments: Boolean): JsonObject {
+        val trimmed = if (allowComments) stripJsonComments(raw.trim()) else raw.trim()
+        val element = json.parseToJsonElement(trimmed)
+        return element.jsonObject
+    }
+
+    private fun stripJsonComments(raw: String): String {
+        val withoutBlock = raw.replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
+        return withoutBlock.lineSequence()
+            .map { line ->
+                val idx = line.indexOf("//")
+                if (idx < 0) line else line.substring(0, idx)
+            }
+            .joinToString("\n")
+    }
+
+    private fun parseMcpSection(root: JsonObject): List<ImportedMcpServer> {
+        val mcp = root["mcp"]?.jsonObject ?: return emptyList()
+        val results = mutableListOf<ImportedMcpServer>()
+        for ((name, value) in mcp) {
+            val obj = runCatching { value.jsonObject }.getOrNull() ?: continue
+            val type = obj["type"].asJsonString().orEmpty()
+            if (type.isNotBlank() && !type.equals("remote", ignoreCase = true)) continue
+            val enabled = obj["enabled"].asJsonBoolean() ?: true
+            if (!enabled) continue
+            val url = obj["url"].asJsonString()?.trim().orEmpty()
+            if (!url.startsWith("http://") && !url.startsWith("https://")) continue
+            val auth = parseAuthorization(obj["headers"]?.jsonObject?.get("Authorization"))
+            results += ImportedMcpServer(
+                name = name.trim(),
+                url = url,
+                token = auth.plainToken,
+                hasToken = auth.hasToken,
+            )
+        }
+        return results
+    }
+
+    private fun JsonElement?.asJsonString(): String? = when (this) {
+        null -> null
+        is JsonPrimitive -> content
+        else -> null
+    }
+
+    private fun JsonElement?.asJsonBoolean(): Boolean? = when (this) {
+        null -> null
+        is JsonPrimitive -> content.toBooleanStrictOrNull()
+        else -> null
+    }
+
+    private data class ParsedAuth(val plainToken: String?, val hasToken: Boolean)
+
+    private fun parseAuthorization(element: JsonElement?): ParsedAuth {
+        val raw = element?.jsonPrimitive?.content?.trim().orEmpty()
+        if (raw.isBlank()) return ParsedAuth(null, false)
+        val bearer = BEARER_PREFIX.matchEntire(raw)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+        val value = bearer.ifBlank { raw }
+        if (isEnvRef(value)) return ParsedAuth(null, true)
+        return ParsedAuth(value, true)
+    }
+
+    private fun isEnvRef(value: String): Boolean =
+        value.startsWith("{env:") && value.endsWith("}")
+
+    private fun parsePluginSection(root: JsonObject): List<String> {
+        val plugin = root["plugin"] ?: return emptyList()
+        return when (plugin) {
+            is JsonArray -> plugin.mapNotNull { element -> element.asJsonString()?.trim()?.takeIf { it.isNotEmpty() } }
+            is JsonPrimitive -> plugin.content.trim().takeIf { it.isNotEmpty() }?.let { listOf(it) } ?: emptyList()
+            else -> emptyList()
+        }
+    }
+
+    private fun readPackageJsonPlugins(filesDir: File): List<String> {
+        val pkgFile = File(nativeConfigDir(filesDir), "package.json")
+        if (!pkgFile.exists()) return emptyList()
+        val root = runCatching { json.parseToJsonElement(pkgFile.readText()).jsonObject }.getOrNull() ?: return emptyList()
+        val deps = root["dependencies"]?.jsonObject ?: return emptyList()
+        return deps.mapNotNull { (name, versionElement) ->
+            if (name in INTERNAL_PACKAGE_DEPS) return@mapNotNull null
+            val version = versionElement.jsonPrimitive.content.trim()
+            when {
+                version.isBlank() || version == "*" -> name
+                else -> "$name@$version"
+            }
+        }
+    }
+
+    private fun hasDefaultPluginPackage(filesDir: File): Boolean {
+        val pkgFile = File(nativeConfigDir(filesDir), "package.json")
+        if (!pkgFile.exists()) return false
+        val root = runCatching { json.parseToJsonElement(pkgFile.readText()).jsonObject }.getOrNull() ?: return false
+        return root["dependencies"]?.jsonObject?.containsKey(DEFAULT_PLUGIN_PACKAGE) == true
+    }
+}

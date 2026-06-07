@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <receiver
+            android:name=".runtime.RuntimeDebugReceiver"
+            android:exported="true"
+            android:permission="com.opencode.android.runtime.permission.CONTROL">
+            <intent-filter>
+                <action android:name="com.opencode.android.DEBUG_RUNTIME_START" />
+                <action android:name="com.opencode.android.DEBUG_RUNTIME_RESTART" />
+                <action android:name="com.opencode.android.DEBUG_RUNTIME_STOP" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

@@ -161,7 +161,8 @@ fun MessageBubble(
                 Spacer(Modifier.height(8.dp))
 
                 var textIndex = 0
-                message.visibleParts.forEach { part ->
+                val orderedParts = message.visibleParts.sortedBy { it.sourceOrder }
+                orderedParts.forEach { part ->
                     when (part.type) {
                         "text" -> {
                             val currentTextIndex = textIndex++
@@ -219,7 +220,7 @@ fun MessageBubble(
                                     tool = toolName,
                                     arg = arg,
                                     status = if (status == "completed") "done" else status,
-                                    output = part.state?.output?.take(2000),
+                                    output = part.state?.output,
                                     input = inputDetail,
                                 )
                                 Spacer(Modifier.height(3.dp))

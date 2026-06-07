@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <permission
+        android:name="com.opencode.android.runtime.permission.CONTROL"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="OpenCode Runtime"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.OpenCodeRuntime"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".RuntimeBootstrapActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:finishOnTaskLaunch="true"
+            android:noHistory="true"
+            android:permission="com.opencode.android.runtime.permission.CONTROL"
+            android:theme="@style/Theme.OpenCodeRuntime.Bootstrap">
+            <intent-filter>
+                <action android:name="com.opencode.android.runtime.START" />
+                <action android:name="com.opencode.android.runtime.STOP" />
+                <action android:name="com.opencode.android.runtime.RESTART" />
+                <action android:name="com.opencode.android.runtime.REQUEST_BATTERY_EXEMPTION" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".RuntimeService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="com.opencode.android.runtime.permission.CONTROL">
+            <intent-filter>
+                <action android:name="com.opencode.android.runtime.START" />
+                <action android:name="com.opencode.android.runtime.STOP" />
+                <action android:name="com.opencode.android.runtime.RESTART" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Runs the OpenCode local runtime for the signed controller app" />
+        </service>
+    </application>
+
+</manifest>

@@ -3,6 +3,7 @@ package com.opencode.android.ui.screen.chat
 import com.opencode.android.data.model.Message
 import com.opencode.android.data.model.MessageInfo
 import com.opencode.android.data.model.MessagePart
+import com.opencode.android.data.model.ToolState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -145,6 +146,39 @@ class ChatStateHolderTest {
         val released = holder.messages.last()
         assertNotNull(released.visibleParts.firstOrNull { it.type == "tool" })
         assertTrue(released.deferredParts.isEmpty())
+        assertEquals(
+            listOf("reasoning", "text", "tool"),
+            released.visibleParts.sortedBy { it.sourceOrder }.map { it.type },
+        )
+    }
+
+    @Test
+    fun multiStepThinkingStaysBeforeFinalTextInServerOrder() {
+        val holder = holderWithStreamingText("final answer")
+        holder.onServerMessages(
+            listOf(
+                Message(
+                    info = MessageInfo(id = "a1", role = "assistant"),
+                    parts = listOf(
+                        MessagePart(type = "reasoning", id = "r1", text = "think 1"),
+                        MessagePart(
+                            type = "tool",
+                            tool = "bash",
+                            callID = "c1",
+                            state = ToolState(status = "completed", output = "line1\nline2\nline3"),
+                        ),
+                        MessagePart(type = "reasoning", id = "r2", text = "think 2"),
+                        MessagePart(type = "text", text = "final answer"),
+                    ),
+                ),
+            ),
+        )
+
+        holder.releaseDeferredParts()
+        val ordered = holder.messages.last().visibleParts.sortedBy { it.sourceOrder }
+        assertEquals(listOf("reasoning", "tool", "reasoning", "text"), ordered.map { it.type })
+        assertEquals("think 2", ordered[2].text)
+        assertTrue(ordered.indexOfFirst { it.type == "text" } > ordered.indexOfLast { it.type == "reasoning" })
     }
 
     @Test

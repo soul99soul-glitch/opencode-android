@@ -38,6 +38,24 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // Local runtime (Option C): the native opencode binary + glibc support run inside the
+    // main app process so that outbound LLM traffic uses the foreground app's UID, which has
+    // network access. useLegacyPackaging extracts the binary to nativeLibraryDir so it can be
+    // exec'd. The payload is referenced from the :runtime module's source tree to avoid
+    // duplicating ~246MB on disk.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir(rootProject.file("runtime/src/main/jniLibs"))
+            assets.srcDir(rootProject.file("runtime/src/main/assets"))
+        }
+    }
 }
 
 dependencies {
@@ -49,6 +67,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.documentfile)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

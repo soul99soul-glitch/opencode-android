@@ -12,6 +12,81 @@ data class ServerConfig(
 )
 
 @Serializable
+enum class ConnectionMode {
+    LAN,
+    LOCAL_BUNDLED,
+    LOCAL_EXTERNAL,
+}
+
+@Serializable
+data class LanProfile(
+    val host: String = "127.0.0.1",
+    val port: Int = 4096,
+    val password: String = "",
+    val directory: String = "",
+)
+
+@Serializable
+data class LocalProfile(
+    val bundledPort: Int = 4097,
+    val externalPort: Int = 4096,
+    val workspacePath: String = "",
+    val workspaceTreeUri: String = "",
+    val autoStart: Boolean = true,
+)
+
+fun sanitizeLocalWorkspaceName(input: String): String =
+    com.opencode.android.runtime.WorkspacePaths.sanitizeName(input)
+
+@Serializable
+data class ActiveEndpoint(
+    val mode: ConnectionMode = ConnectionMode.LAN,
+    val baseUrl: String = "http://127.0.0.1:4096",
+    val password: String = "",
+    val directory: String = "",
+    val workspaceLabel: String = "",
+) {
+    val displayUrl: String
+        get() = baseUrl.removePrefix("http://").removePrefix("https://")
+
+    // Password is excluded so auth rotation does not discard current in-memory UI state.
+    val identityKey: String
+        get() = "${mode.name}|$baseUrl|$directory"
+
+    companion object {
+        fun fallback(): ActiveEndpoint = ActiveEndpoint()
+    }
+}
+
+fun ServerConfig.toLanProfile(): LanProfile =
+    LanProfile(host = host, port = port, password = password, directory = directory)
+
+fun ServerConfig.toActiveEndpoint(mode: ConnectionMode = ConnectionMode.LAN): ActiveEndpoint =
+    ActiveEndpoint(
+        mode = mode,
+        baseUrl = when {
+            host.startsWith("http://") || host.startsWith("https://") -> host.trimEnd('/')
+            else -> "http://$host:$port"
+        },
+        password = password,
+        directory = directory,
+    )
+
+fun LanProfile.toServerConfig(): ServerConfig =
+    ServerConfig(host = host, port = port, password = password, directory = directory)
+
+fun LanProfile.toActiveEndpoint(): ActiveEndpoint =
+    toServerConfig().toActiveEndpoint(ConnectionMode.LAN)
+
+fun LocalProfile.toActiveEndpoint(mode: ConnectionMode, password: String = ""): ActiveEndpoint =
+    ActiveEndpoint(
+        mode = mode,
+        baseUrl = "http://127.0.0.1:${if (mode == ConnectionMode.LOCAL_EXTERNAL) externalPort else bundledPort}",
+        password = password,
+        directory = workspacePath,
+    )
+
+@Serializable
 data class HealthResponse(
     val healthy: Boolean = false,
     val version: String = ""
@@ -134,7 +209,188 @@ data class FileInfo(
     val size: Long? = null
 )
 
+/* Local bundled provider profile */
+
+@Serializable
+data class LocalProviderProfile(
+    val enabled: Boolean = false,
+    val presetId: String = LocalProviderPresets.DEFAULT_ID,
+    val providerId: String = LocalProviderDefaults.PROVIDER_ID,
+    val displayName: String = LocalProviderDefaults.DISPLAY_NAME,
+    val baseUrl: String = "",
+    val codingBaseUrl: String = "",
+    val activeBaseUrl: String = "",
+    val modelIds: List<String> = emptyList(),
+    val hasApiKey: Boolean = false,
+)
+
+object LocalProviderDefaults {
+    const val PROVIDER_ID = "android-local"
+    const val DISPLAY_NAME = "Android Local"
+    const val API_KEY_ENV = "OPENCODE_ANDROID_PROVIDER_API_KEY"
+}
+
+data class LocalProviderPreset(
+    val id: String,
+    val displayName: String,
+    val defaultEnabled: Boolean,
+    val apiBaseUrl: String,
+    val codingBaseUrl: String = "",
+    val modelIds: List<String> = emptyList(),
+)
+
+object LocalProviderPresets {
+    const val DEFAULT_ID = "openai"
+
+    val ALL: List<LocalProviderPreset> = listOf(
+        LocalProviderPreset(
+            id = "openai",
+            displayName = "OpenAI",
+            defaultEnabled = true,
+            apiBaseUrl = "https://api.openai.com/v1",
+            codingBaseUrl = "https://chatgpt.com/backend-api/codex",
+            modelIds = listOf("gpt-image-2"),
+        ),
+        LocalProviderPreset(
+            id = "gemini",
+            displayName = "Gemini",
+            defaultEnabled = true,
+            apiBaseUrl = "https://generativelanguage.googleapis.com/v1beta",
+            codingBaseUrl = "https://cloudcode-pa.googleapis.com",
+            modelIds = listOf("gemini-3.1-flash-image-preview"),
+        ),
+        LocalProviderPreset(
+            id = "deepseek",
+            displayName = "DeepSeek",
+            defaultEnabled = true,
+            apiBaseUrl = "https://api.deepseek.com/v1",
+        ),
+        LocalProviderPreset(
+            id = "openrouter",
+            displayName = "OpenRouter",
+            defaultEnabled = true,
+            apiBaseUrl = "https://openrouter.ai/api/v1",
+        ),
+        LocalProviderPreset(
+            id = "kimi",
+            displayName = "月之暗面 (Kimi)",
+            defaultEnabled = false,
+            apiBaseUrl = "https://api.moonshot.cn/v1",
+            codingBaseUrl = "https://api.kimi.com/coding/v1",
+        ),
+        LocalProviderPreset(
+            id = "glm",
+            displayName = "智谱 GLM",
+            defaultEnabled = false,
+            apiBaseUrl = "https://open.bigmodel.cn/api/paas/v4",
+            codingBaseUrl = "https://open.bigmodel.cn/api/coding/paas/v4",
+        ),
+        LocalProviderPreset(
+            id = "mimo",
+            displayName = "小米 MiMo",
+            defaultEnabled = false,
+            apiBaseUrl = "https://api.xiaomi.com/v1",
+            codingBaseUrl = "https://token-plan-cn.xiaomimimo.com/v1",
+        ),
+        LocalProviderPreset(
+            id = "minimax",
+            displayName = "MiniMax",
+            defaultEnabled = false,
+            apiBaseUrl = "https://api.minimaxi.com/v1",
+            codingBaseUrl = "https://api.minimaxi.com/v1",
+            modelIds = listOf("MiniMax-M3"),
+        ),
+        LocalProviderPreset(
+            id = "xai",
+            displayName = "xAI",
+            defaultEnabled = false,
+            apiBaseUrl = "https://api.x.ai/v1",
+        ),
+    )
+
+    fun byId(id: String): LocalProviderPreset? =
+        ALL.firstOrNull { it.id == id }
+
+    fun bestMatch(profile: LocalProviderProfile): LocalProviderPreset {
+        val saved = byId(profile.presetId)
+        if (saved != null && saved.id != DEFAULT_ID) return saved
+        val urlMatch = ALL.firstOrNull { preset ->
+            preset.apiBaseUrl == profile.baseUrl ||
+                (preset.codingBaseUrl.isNotBlank() && preset.codingBaseUrl == profile.codingBaseUrl) ||
+                (preset.codingBaseUrl.isNotBlank() && preset.codingBaseUrl == profile.activeBaseUrl)
+        }
+        return urlMatch ?: saved ?: ALL.first { it.id == DEFAULT_ID }
+    }
+
+    fun prefersCodingBase(presetId: String): Boolean =
+        presetId in setOf("kimi", "glm", "mimo", "minimax")
+}
+
+fun parseModelIds(input: String): List<String> =
+    input.split(',', '\n', ';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+
+fun LocalProviderProfile.validate(): String? {
+    if (!enabled) return null
+    val url = baseUrl.trim()
+    if (url.isBlank()) return "Base URL is required"
+    if (!BASE_URL_PATTERN.matches(url)) return "Base URL must start with http:// or https://"
+    val codingUrl = codingBaseUrl.trim()
+    if (codingUrl.isNotBlank() && !BASE_URL_PATTERN.matches(codingUrl)) {
+        return "Coding Base URL must start with http:// or https://"
+    }
+    val activeUrl = activeBaseUrl.trim()
+    if (activeUrl.isNotBlank() && !BASE_URL_PATTERN.matches(activeUrl)) {
+        return "Active Base URL must start with http:// or https://"
+    }
+    if (modelIds.isEmpty()) return "At least one model is required"
+    if (modelIds.any { !MODEL_ID_PATTERN.matches(it) }) {
+        return "Model IDs may use letters, numbers, slash, dot, underscore, colon, or hyphen"
+    }
+    return null
+}
+
+private val BASE_URL_PATTERN = Regex("^https?://\\S+$")
+private val MODEL_ID_PATTERN = Regex("^[A-Za-z0-9._:/-]{1,180}$")
+
+/* MCP servers + plugins (opencode-compatible local-mode extensions) */
+
+object McpConfigSource {
+    const val APP = "app"
+    const val AGENT = "agent"
+}
+
+@Serializable
+data class McpServerConfig(
+    val name: String,
+    val url: String,
+    val hasToken: Boolean = false,
+    val source: String = McpConfigSource.APP,
+)
+
+private val MCP_NAME_PATTERN = Regex("^[A-Za-z0-9._-]{1,60}$")
+
+fun McpServerConfig.validate(): String? {
+    if (!MCP_NAME_PATTERN.matches(name)) return "MCP name may use letters, numbers, dot, underscore, hyphen"
+    if (!BASE_URL_PATTERN.matches(url.trim())) return "MCP URL must start with http:// or https://"
+    return null
+}
+
+/** Parse a newline/comma/semicolon separated list of npm plugin specs. */
+fun parsePluginSpecs(input: String): List<String> =
+    input.split(',', '\n', ';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+
 /* Provider / Model discovery */
+
+@Serializable
+data class ConfigProvidersResponse(
+    val providers: List<Provider>? = null,
+)
 
 @Serializable
 data class ProviderResponse(

@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -35,6 +36,10 @@ fun OpenCodeNavHost() {
     val isSetupDone by prefs.isSetupDone.collectAsState(initial = null)
 
     val navController = rememberNavController()
+
+    LaunchedEffect(Unit) {
+        prefs.migrateLegacySecrets()
+    }
 
     if (isSetupDone == null) return
 

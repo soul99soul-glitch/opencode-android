@@ -50,6 +50,10 @@ private fun JsonObject.serverMessage(): String? {
         ?.contentOrNull
     if (!dataMessage.isNullOrBlank()) return dataMessage
 
+    val nestedError = this["error"] as? JsonObject
+    val errorMessage = (nestedError?.get("message") as? JsonPrimitive)?.contentOrNull
+    if (!errorMessage.isNullOrBlank()) return errorMessage
+
     val message = (this["message"] as? JsonPrimitive)?.contentOrNull
     if (!message.isNullOrBlank()) return message
 
