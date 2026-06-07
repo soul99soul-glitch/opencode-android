@@ -24,19 +24,20 @@ object SafWorkspaceBridge {
     }
 
     fun requireAccess(context: Context, workspaceTreeUri: String) {
+        val msg = context.getString(com.opencode.android.R.string.error_external_folder_permission_lost)
         if (!hasPersistedPermission(context, workspaceTreeUri)) {
-            throw IllegalStateException(EXTERNAL_FOLDER_PERMISSION_LOST)
+            throw IllegalStateException(msg)
         }
         val uri = Uri.parse(workspaceTreeUri)
         val root = DocumentFile.fromTreeUri(context, uri)
-            ?: throw IllegalStateException(EXTERNAL_FOLDER_PERMISSION_LOST)
+            ?: throw IllegalStateException(msg)
         if (!root.canRead() || !root.canWrite()) {
-            throw IllegalStateException(EXTERNAL_FOLDER_PERMISSION_LOST)
+            throw IllegalStateException(msg)
         }
     }
 
     const val EXTERNAL_FOLDER_PERMISSION_LOST =
-        "外部文件夹访问权限已失效，请在设置中重新 Browse 选择文件夹。"
+        "External folder access permission has expired. Please re-select the folder in Settings > Browse."
 
     fun displayName(context: Context, treeUri: Uri): String? {
         DocumentFile.fromTreeUri(context, treeUri)?.name?.takeIf { it.isNotBlank() }?.let { return it }

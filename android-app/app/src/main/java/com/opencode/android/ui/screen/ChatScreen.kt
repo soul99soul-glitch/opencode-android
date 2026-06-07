@@ -93,6 +93,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import androidx.compose.ui.res.stringResource
+import com.opencode.android.R
 
 /** Local UI model for attached files/images */
 private data class AttachmentItem(
@@ -135,7 +137,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     val json = remember { Json { ignoreUnknownKeys = true; isLenient = true } }
     val c = LocalOcColors.current
 
-    var displayTitle by remember { mutableStateOf(sessionTitle?.ifBlank { null } ?: "新会话") }
+    val newSessionLabel = stringResource(R.string.chat_new_session)
+    var displayTitle by remember { mutableStateOf(sessionTitle?.ifBlank { null } ?: newSessionLabel) }
     val chatState = remember(sessionId) { ChatStateHolder(sessionId) }
     val messages = chatState.messages
     var isLoading by remember { mutableStateOf(true) }
@@ -469,7 +472,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 chatState.onCompleted()
                 scope.launch { syncServerMessagesAfterIdle() }
                 if (hadNoOutput) {
-                    errorMsg = "No response received — server may have failed to process the prompt"
+                    errorMsg = context.getString(R.string.chat_no_response)
                 }
             }
         }
@@ -839,7 +842,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             .verticalScroll(rememberScrollState()),
                     ) {
                         Text(
-                            if (isAgentPanel) "SUBTASK" else "COMMANDS",
+                            if (isAgentPanel) stringResource(R.string.chat_panel_subtask) else stringResource(R.string.chat_panel_commands),
                             style = OcType.mono.copy(fontSize = 10.sp),
                             color = c.ink4,
                         )
@@ -848,7 +851,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             // ── @ agent panel: show all available agents ──
                             val agents = allKnownAgents
                             if (agents.isEmpty()) {
-                                Text("Loading agents…", style = OcType.mono.copy(fontSize = 12.sp), color = c.ink4)
+                                Text(stringResource(R.string.chat_loading_agents), style = OcType.mono.copy(fontSize = 12.sp), color = c.ink4)
                             } else {
                                 agents.forEach { ag ->
                                     Row(
@@ -872,11 +875,11 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             val typed = rawText.trimStart().removePrefix("/").trim()
                             // Mapped agent commands (these route to specific subagents)
                             val agentCommands = listOf(
-                                "review" to "Code review",
-                                "fix" to "Fix bugs",
-                                "find" to "Search codebase",
-                                "explain" to "Explain code",
-                                "plan" to "Create plan",
+                                "review" to stringResource(R.string.chat_cmd_review),
+                                "fix" to stringResource(R.string.chat_cmd_fix),
+                                "find" to stringResource(R.string.chat_cmd_find),
+                                "explain" to stringResource(R.string.chat_cmd_explain),
+                                "plan" to stringResource(R.string.chat_cmd_plan),
                             )
                             // Real skills from server, filtered by typed text
                             val filteredSkills = if (typed.isEmpty()) {
@@ -912,14 +915,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             // Divider
                             if (showDivider) {
                                 Spacer(Modifier.height(4.dp))
-                                Text("SKILLS", style = OcType.mono.copy(fontSize = 10.sp), color = c.ink4,
+                                Text(stringResource(R.string.chat_panel_skills), style = OcType.mono.copy(fontSize = 10.sp), color = c.ink4,
                                     modifier = Modifier.padding(horizontal = 12.dp))
                                 Spacer(Modifier.height(4.dp))
                             }
 
                             // Skill items
                             if (filteredSkills.isEmpty() && typed.isNotEmpty()) {
-                                Text("No matching skills", style = OcType.mono.copy(fontSize = 12.sp),
+                                Text(stringResource(R.string.chat_no_matching_skills), style = OcType.mono.copy(fontSize = 12.sp),
                                     color = c.ink4, modifier = Modifier.padding(horizontal = 12.dp))
                             } else {
                                 filteredSkills.forEach { skill ->
@@ -958,7 +961,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(label, style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
-                        Text(parsedRest ?: "Type to prompt ${shortAgent(parsedAgent ?: "")}…",
+                        Text(parsedRest ?: stringResource(R.string.chat_input_prompt_placeholder, shortAgent(parsedAgent ?: "")),
                             style = OcType.mono.copy(fontSize = 11.sp), color = c.ink3)
                     }
                     Spacer(Modifier.height(4.dp))
@@ -1073,7 +1076,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             cursorBrush = SolidColor(c.accent),
                             decorationBox = { inner ->
                                 if (inputText.text.isEmpty()) {
-                                    Text("Ask opencode…", style = OcType.body, color = c.ink4)
+                                    Text(stringResource(R.string.chat_input_placeholder), style = OcType.body, color = c.ink4)
                                 }
                                 inner()
                             },
@@ -1195,7 +1198,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                                 }
                                             }
                                             // Refresh title if still placeholder
-                                            if (displayTitle == "新会话") {
+                                            if (displayTitle == context.getString(R.string.chat_new_session)) {
                                                 val api = OpenCodeApi(prefs.activeEndpoint.first())
                                                 try {
                                                     api.getSession(sessionId).onSuccess { s ->
@@ -1211,7 +1214,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                             if (sseBuffer.isEmpty() && chatState.onSendFailure()) {
                                                 val msg = it.message ?: "Unknown error"
                                                 errorMsg = if (msg.contains("No suitable converter") || msg.contains("SerializationException"))
-                                                    "Unexpected server response"
+                                                    context.getString(R.string.chat_unexpected_response)
                                                 else msg.take(120)
                                                 isSending = false
                                                 resetStreamBuffers()

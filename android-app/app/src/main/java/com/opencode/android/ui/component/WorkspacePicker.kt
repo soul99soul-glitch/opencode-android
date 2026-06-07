@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.WorkspaceOption
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcType
+import androidx.compose.ui.res.stringResource
+import com.opencode.android.R
 
 @Composable
 fun WorkspacePicker(
@@ -46,10 +48,10 @@ fun WorkspacePicker(
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            MonoLabel("> WORKSPACES")
+            MonoLabel(stringResource(R.string.workspace_section_title))
             Spacer(Modifier.weight(1f))
             Text(
-                if (loading) "loading..." else "Load",
+                if (loading) stringResource(R.string.settings_value_loading) else stringResource(R.string.setup_action_load),
                 style = OcType.mono,
                 color = if (loading) c.ink4 else c.accent,
                 modifier = Modifier.pressable(enabled = !loading, onClick = onLoad),
@@ -68,7 +70,7 @@ fun WorkspacePicker(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (pinnedOptions.isNotEmpty()) {
-                MonoLabel("PINNED", modifier = Modifier.padding(horizontal = 2.dp))
+                MonoLabel(stringResource(R.string.workspace_pinned), modifier = Modifier.padding(horizontal = 2.dp))
                 pinnedOptions.forEach { option ->
                     WorkspaceOptionRow(
                         option = option,
@@ -80,7 +82,7 @@ fun WorkspacePicker(
             }
             if (pinnedOptions.isNotEmpty() && otherOptions.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
-                MonoLabel("ALL", modifier = Modifier.padding(horizontal = 2.dp))
+                MonoLabel(stringResource(R.string.workspace_all), modifier = Modifier.padding(horizontal = 2.dp))
             }
             otherOptions.forEach { option ->
                 WorkspaceOptionRow(
@@ -126,7 +128,7 @@ private fun WorkspaceOptionRow(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "${option.sessionCount} sessions",
+                    stringResource(R.string.workspace_sessions_count, option.sessionCount),
                     style = OcType.mono.copy(fontSize = 11.sp),
                     color = c.ink3,
                 )

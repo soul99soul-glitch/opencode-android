@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcType
+import androidx.compose.ui.res.stringResource
+import com.opencode.android.R
 
 @Composable
 fun LocalWorkspacePicker(
@@ -54,7 +56,7 @@ fun LocalWorkspacePicker(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    if (selected) "current" else "open",
+                    if (selected) stringResource(R.string.workspace_current) else stringResource(R.string.workspace_open),
                     style = OcType.mono.copy(fontSize = 11.sp),
                     color = if (selected) c.accent else c.ink3,
                 )

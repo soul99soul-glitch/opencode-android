@@ -1,6 +1,8 @@
 package com.opencode.android
 
 import android.app.Activity
+import android.content.Context
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,7 +22,24 @@ import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcAccent
 import com.opencode.android.ui.theme.OcTheme
 
+
 class MainActivity : ComponentActivity() {
+
+    override fun attachBaseContext(newBase: Context) {
+        // Read cached locale tag (synchronous, no DataStore I/O on cold start)
+        val prefs = newBase.getSharedPreferences("oc_appearance_cache", Context.MODE_PRIVATE)
+        val cachedTag = prefs.getString("language_tag", null)
+        val locale = if (cachedTag != null) {
+            AppearanceRepository.tagToLocale(cachedTag)
+        } else {
+            // First launch: use system default, cache will be populated after DataStore read
+            java.util.Locale.getDefault()
+        }
+        val config = Configuration(newBase.resources.configuration)
+        config.setLocale(locale)
+        super.attachBaseContext(newBase.createConfigurationContext(config))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

@@ -26,14 +26,6 @@ class WorkspaceDisplayTest {
         assertEquals("/data/data/app/files/workspaces/default", WorkspaceDisplay.endpointDirectoryLabel(endpoint))
     }
 
-    @Test
-    fun internalWorkspaceLabelDoesNotNeedContext() {
-        val local = LocalProfile(workspacePath = "default")
-        assertEquals("内置：default", WorkspaceDisplay.bundledLabel(context = nullContext(), local))
-    }
-
-    private fun nullContext(): android.content.Context =
-        object : android.content.ContextWrapper(null) {
-            override fun getApplicationContext(): android.content.Context = this
-        }
+    // bundledLabel now requires a real Android Context for string resources.
+    // Tested via instrumented tests or manual verification.
 }

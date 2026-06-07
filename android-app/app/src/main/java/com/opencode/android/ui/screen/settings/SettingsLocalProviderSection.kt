@@ -10,8 +10,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.opencode.android.R
 import com.opencode.android.data.model.LocalProviderPreset
 import com.opencode.android.data.model.LocalProviderPresets
 import com.opencode.android.ui.component.Hairline
@@ -49,7 +51,7 @@ internal fun SettingsLocalProviderSection(
 ) {
     val c = LocalOcColors.current
 
-    SectionHeader("LOCAL PROVIDER")
+    SectionHeader(stringResource(R.string.local_provider_section_title))
     SettingsCard {
         Row(
             Modifier
@@ -58,9 +60,9 @@ internal fun SettingsLocalProviderSection(
                 .padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Enable", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.local_provider_enable), style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
             Text(
-                if (providerEnabledDraft) "On" else "Off",
+                if (providerEnabledDraft) stringResource(R.string.settings_value_on) else stringResource(R.string.settings_value_off),
                 style = OcType.mono,
                 color = if (providerEnabledDraft) c.accent else c.ink3,
             )
@@ -84,13 +86,13 @@ internal fun SettingsLocalProviderSection(
         }
         Hairline()
         EditableSettingsRow(
-            label = "API Base",
+            label = stringResource(R.string.local_provider_api_base),
             value = providerBaseUrlDraft,
             onValueChange = onBaseUrlChange,
         )
         Hairline()
         EditableSettingsRow(
-            label = "Coding Base",
+            label = stringResource(R.string.local_provider_coding_base),
             value = providerCodingBaseUrlDraft,
             onValueChange = onCodingBaseUrlChange,
         )
@@ -127,12 +129,12 @@ internal fun SettingsLocalProviderSection(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             LocalAction(
-                "Apply",
+                stringResource(R.string.settings_action_apply),
                 enabled = !providerEnabledDraft || providerValidationMessage == null,
                 modifier = Modifier.fillMaxWidth(),
             ) { onApply() }
             Text(
-                providerValidationMessage ?: providerStatus ?: "—",
+                providerValidationMessage ?: providerStatus ?: stringResource(R.string.settings_placeholder_empty),
                 style = OcType.mono.copy(fontSize = 11.sp),
                 color = if (providerValidationMessage == null) c.ink3 else c.accent,
             )

@@ -23,12 +23,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.opencode.android.R
 import com.opencode.android.data.model.ConnectionMode
 import com.opencode.android.data.model.LocalProviderPreset
 import com.opencode.android.data.model.McpConfigSource
@@ -118,7 +120,7 @@ internal fun EditableSettingsRow(
             decorationBox = { inner ->
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                     if (value.isBlank()) {
-                        Text("—", style = OcType.mono, color = c.ink4, textAlign = TextAlign.End)
+                        Text(stringResource(R.string.settings_placeholder_empty), style = OcType.mono, color = c.ink4, textAlign = TextAlign.End)
                     }
                     inner()
                 }
@@ -200,7 +202,7 @@ internal fun ProviderPresetRow(
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Provider", style = OcType.body, color = c.ink, modifier = Modifier.widthIn(min = 104.dp))
+        Text(stringResource(R.string.settings_section_provider), style = OcType.body, color = c.ink, modifier = Modifier.widthIn(min = 104.dp))
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
             Text(
@@ -251,7 +253,7 @@ internal fun ProviderPresetOption(
                 )
                 if (preset.defaultEnabled) {
                     Spacer(Modifier.width(8.dp))
-                    Text("Default", style = OcType.mono.copy(fontSize = 10.sp), color = c.ink4)
+                    Text(stringResource(R.string.local_provider_default), style = OcType.mono.copy(fontSize = 10.sp), color = c.ink4)
                 }
             }
             Text(
@@ -263,7 +265,7 @@ internal fun ProviderPresetOption(
             )
         }
         Text(
-            if (selected) "Selected" else "Use",
+            if (selected) stringResource(R.string.local_provider_selected) else stringResource(R.string.local_provider_use),
             style = OcType.mono.copy(fontSize = 11.sp),
             color = if (selected) c.accent else c.ink4,
         )
@@ -286,14 +288,14 @@ internal fun ProviderModelRow(
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Model", style = OcType.body, color = c.ink, modifier = Modifier.widthIn(min = 104.dp))
+        Text(stringResource(R.string.local_provider_model), style = OcType.body, color = c.ink, modifier = Modifier.widthIn(min = 104.dp))
         Spacer(Modifier.width(14.dp))
         Text(
             when {
                 model.isNotBlank() -> model
-                loading -> "Fetching..."
-                hasCandidates -> "Choose..."
-                else -> "Choose..."
+                loading -> stringResource(R.string.local_provider_fetching)
+                hasCandidates -> stringResource(R.string.local_provider_choose)
+                else -> stringResource(R.string.local_provider_choose)
             },
             style = OcType.mono,
             color = if (model.isNotBlank()) c.ink2 else c.ink4,
@@ -323,9 +325,9 @@ internal fun ProviderModelCandidatePicker(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Models", style = OcType.mono.copy(fontSize = 11.sp), color = c.ink4, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.local_provider_models), style = OcType.mono.copy(fontSize = 11.sp), color = c.ink4, modifier = Modifier.weight(1f))
             Text(
-                if (loading) "fetching..." else "Retry",
+                if (loading) stringResource(R.string.local_provider_fetching_models) else stringResource(R.string.local_provider_retry),
                 style = OcType.mono.copy(fontSize = 11.sp),
                 color = if (loading) c.ink4 else c.accent,
                 modifier = Modifier.pressable(enabled = !loading) { onRetry() },
@@ -340,7 +342,7 @@ internal fun ProviderModelCandidatePicker(
         ) {
             if (models.isEmpty()) {
                 Text(
-                    if (loading) "Loading models..." else "No models yet",
+                    if (loading) stringResource(R.string.local_provider_loading_models) else stringResource(R.string.local_provider_no_models),
                     style = OcType.mono.copy(fontSize = 11.sp),
                     color = c.ink4,
                     modifier = Modifier.padding(vertical = 8.dp),
@@ -365,7 +367,7 @@ internal fun ProviderModelCandidatePicker(
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        if (selected) "selected" else "select",
+                        if (selected) stringResource(R.string.local_provider_selected) else stringResource(R.string.local_provider_select),
                         style = OcType.mono.copy(fontSize = 10.sp),
                         color = if (selected) c.accent else c.ink4,
                     )
@@ -393,7 +395,7 @@ internal fun ProviderApiKeyRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "API Key",
+            stringResource(R.string.local_provider_api_key),
             style = OcType.body,
             color = c.ink,
             maxLines = 1,
@@ -413,7 +415,7 @@ internal fun ProviderApiKeyRow(
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                     if (value.isBlank()) {
                         Text(
-                            if (hasSavedKey) "Saved" else "—",
+                            if (hasSavedKey) stringResource(R.string.settings_value_saved) else stringResource(R.string.settings_placeholder_empty),
                             style = OcType.mono,
                             color = if (hasSavedKey) c.ink2 else c.ink4,
                             textAlign = TextAlign.End,
@@ -428,7 +430,7 @@ internal fun ProviderApiKeyRow(
             Box(
                 Modifier.pressable { onClear() }.padding(horizontal = 4.dp, vertical = 2.dp),
             ) {
-                Text("Clear", style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
+                Text(stringResource(R.string.settings_action_clear), style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
             }
         }
     }
@@ -475,7 +477,7 @@ internal fun McpServerEditor(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            McpField(row.name, "name", Modifier.weight(1f)) { onChange(row.copy(name = it)) }
+            McpField(row.name, stringResource(R.string.mcp_field_name), Modifier.weight(1f)) { onChange(row.copy(name = it)) }
             if (fromAgent) {
                 Spacer(Modifier.width(6.dp))
                 Text("agent", style = OcType.mono.copy(fontSize = 10.sp), color = c.accent)
@@ -488,7 +490,7 @@ internal fun McpServerEditor(
                 modifier = Modifier.pressable { onRemove() }.padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
-        McpField(row.url, "https://mcp.example.com/sse", Modifier.fillMaxWidth()) { onChange(row.copy(url = it)) }
+        McpField(row.url, stringResource(R.string.mcp_field_url_placeholder), Modifier.fillMaxWidth()) { onChange(row.copy(url = it)) }
         BasicTextField(
             value = row.token,
             onValueChange = { onChange(row.copy(token = it)) },
@@ -500,7 +502,7 @@ internal fun McpServerEditor(
             decorationBox = { inner ->
                 if (row.token.isBlank()) {
                     Text(
-                        if (row.hasSavedToken) "token: saved (leave blank to keep)" else "bearer token (optional)",
+                        if (row.hasSavedToken) stringResource(R.string.mcp_token_saved) else stringResource(R.string.mcp_token_placeholder),
                         style = OcType.mono.copy(fontSize = 12.sp),
                         color = c.ink4,
                     )

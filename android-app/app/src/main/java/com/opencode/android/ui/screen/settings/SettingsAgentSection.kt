@@ -19,9 +19,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.opencode.android.R
 import com.opencode.android.data.model.AgentInfo
 import com.opencode.android.data.model.Provider
 import com.opencode.android.ui.component.Hairline
@@ -45,7 +47,7 @@ internal fun SettingsAgentSection(
 ) {
     val c = LocalOcColors.current
 
-    SectionHeader("AGENT")
+    SectionHeader(stringResource(R.string.settings_section_agent))
     SettingsCard {
         Row(
             Modifier
@@ -54,7 +56,7 @@ internal fun SettingsAgentSection(
                 .padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Default Agent", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.agent_default_agent), style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
             Text(
                 defaultAgent.replaceFirstChar { it.uppercase() },
                 style = OcType.mono,
@@ -69,11 +71,11 @@ internal fun SettingsAgentSection(
                 .padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Model", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.local_provider_model), style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
             val modelLabel = if (defaultModelProvider.isNotBlank() && defaultModelId.isNotBlank()) {
                 "$defaultModelProvider/$defaultModelId"
             } else {
-                if (providers.isEmpty()) "Loading…" else "Select…"
+                if (providers.isEmpty()) stringResource(R.string.local_provider_loading) else stringResource(R.string.local_provider_select_model)
             }
             Text(
                 modelLabel,

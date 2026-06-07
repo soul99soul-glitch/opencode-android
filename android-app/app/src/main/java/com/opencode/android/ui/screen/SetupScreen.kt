@@ -15,6 +15,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.opencode.android.R
 import com.opencode.android.data.api.OpenCodeApi
 import com.opencode.android.data.api.WorkspaceOption
 import com.opencode.android.data.api.fetchWorkspaceOptions
@@ -85,7 +87,7 @@ fun SetupScreen(onComplete: () -> Unit) {
         try {
             api.fetchWorkspaceOptions()
                 .onSuccess { workspaces = it }
-                .onFailure { workspaceError = it.message ?: "Failed to load workspaces" }
+                .onFailure { workspaceError = it.message ?: context.getString(R.string.setup_error_load_workspaces) }
         } finally {
             api.close()
             isLoadingWorkspaces = false
@@ -131,7 +133,7 @@ fun SetupScreen(onComplete: () -> Unit) {
                 prefs.setSetupDone(true)
                 onComplete()
             }.onFailure {
-                error = it.message ?: "Local runtime failed to start"
+                error = it.message ?: context.getString(R.string.setup_error_local_failed)
             }
         }
     }
@@ -163,7 +165,7 @@ fun SetupScreen(onComplete: () -> Unit) {
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                if (selectedMode == ConnectionMode.LAN) "连接局域网 OpenCode" else "使用手机本地 OpenCode",
+                if (selectedMode == ConnectionMode.LAN) stringResource(R.string.setup_connect_lan) else stringResource(R.string.setup_use_local),
                 style = OcType.body,
                 color = c.ink2,
             )
@@ -178,7 +180,7 @@ fun SetupScreen(onComplete: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             SetupModeButton(
-                label = "LAN",
+                label = stringResource(R.string.setup_mode_lan),
                 selected = selectedMode == ConnectionMode.LAN,
                 c = c,
                 modifier = Modifier.weight(1f),
@@ -187,7 +189,7 @@ fun SetupScreen(onComplete: () -> Unit) {
                 error = null
             }
             SetupModeButton(
-                label = "Local",
+                label = stringResource(R.string.setup_mode_local),
                 selected = selectedMode == ConnectionMode.LOCAL_BUNDLED,
                 c = c,
                 modifier = Modifier.weight(1f),
@@ -203,19 +205,19 @@ fun SetupScreen(onComplete: () -> Unit) {
         val isFullUrl = host.startsWith("http://") || host.startsWith("https://")
         if (selectedMode == ConnectionMode.LAN) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                UnderlineField(host, { host = it }, "> SERVER URL", leading = { GlyphServer() })
+                UnderlineField(host, { host = it }, stringResource(R.string.setup_field_server_url), leading = { GlyphServer() })
                 if (!isFullUrl) {
-                    UnderlineField(port, { port = it }, "> PORT", leading = { GlyphPorts() }, keyboardType = KeyboardType.Number)
+                    UnderlineField(port, { port = it }, stringResource(R.string.setup_field_port), leading = { GlyphPorts() }, keyboardType = KeyboardType.Number)
                 }
-                UnderlineField(password, { password = it }, "> PASSWORD", leading = { GlyphLock() }, placeholder = "Optional", password = true)
+                UnderlineField(password, { password = it }, stringResource(R.string.setup_field_password), leading = { GlyphLock() }, placeholder = stringResource(R.string.setup_placeholder_password), password = true)
                 UnderlineField(
                     directory,
                     { directory = it },
-                    "> DIRECTORY",
+                    stringResource(R.string.setup_field_directory),
                     leading = { GlyphFolder() },
-                    placeholder = "~/projects/opencode",
+                    placeholder = stringResource(R.string.setup_placeholder_directory),
                     trailing = {
-                        FieldAction(if (isLoadingWorkspaces) "..." else if (workspaces.isEmpty()) "Load" else "Pick") {
+                        FieldAction(if (isLoadingWorkspaces) "..." else if (workspaces.isEmpty()) stringResource(R.string.setup_action_load) else stringResource(R.string.setup_action_pick)) {
                             if (workspaces.isEmpty()) {
                                 scope.launch { loadWorkspaces() }
                             } else {
@@ -250,12 +252,12 @@ fun SetupScreen(onComplete: () -> Unit) {
                 UnderlineField(
                     localWorkspaceDraft,
                     { localWorkspaceDraft = sanitizeLocalWorkspaceName(it) },
-                    "> WORKSPACE",
+                    stringResource(R.string.setup_field_workspace),
                     leading = { GlyphFolder() },
-                    placeholder = "default",
+                    placeholder = stringResource(R.string.setup_placeholder_workspace),
                     trailing = {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FieldAction("Browse") { pickExternalFolder() }
+                            FieldAction(stringResource(R.string.setup_action_browse)) { pickExternalFolder() }
                             FieldAction(if (showLocalWorkspacePicker) "Hide" else "App") {
                                 showLocalWorkspacePicker = !showLocalWorkspacePicker
                             }
@@ -264,7 +266,7 @@ fun SetupScreen(onComplete: () -> Unit) {
                 )
                 if (localTreeUriDraft.isNotBlank()) {
                     Text(
-                        "已选外部文件夹 · 含隐藏文件，变更会自动同步回手机",
+                        stringResource(R.string.setup_external_folder_info),
                         style = OcType.mono.copy(fontSize = 11.sp),
                         color = c.ink3,
                     )
@@ -307,7 +309,7 @@ fun SetupScreen(onComplete: () -> Unit) {
 
         if (selectedMode == ConnectionMode.LAN) {
             OcButton(
-                text = "Connect LAN",
+                text = stringResource(R.string.setup_action_connect_lan),
                 style = OcButtonStyle.Primary,
                 loading = isConnecting,
                 onClick = {
@@ -328,17 +330,17 @@ fun SetupScreen(onComplete: () -> Unit) {
                                 prefs.setSetupDone(true)
                                 onComplete()
                             } else {
-                                error = "Server unhealthy"
+                                error = context.getString(R.string.setup_error_server_unhealthy)
                             }
                         }.onFailure {
-                            error = "Connection failed: ${it.message}"
+                            error = context.getString(R.string.setup_error_connection_failed, it.message ?: "")
                         }
                     }
                 },
             )
         } else {
             OcButton(
-                text = "Start Local",
+                text = stringResource(R.string.setup_action_start_local),
                 style = OcButtonStyle.Accent,
                 loading = isConnecting,
                 onClick = { startLocalMode() },
@@ -405,12 +407,12 @@ private fun LanEndpointPreview(isFullUrl: Boolean, host: String, port: String) {
 @Composable
 private fun LocalEndpointPreview(workspaceName: String, usesExternalFolder: Boolean) {
     val c = LocalOcColors.current
-    val workspaceLabel = if (usesExternalFolder) "外部：$workspaceName" else "内置：$workspaceName"
+    val workspaceLabel = if (usesExternalFolder) stringResource(R.string.setup_workspace_external, workspaceName) else stringResource(R.string.setup_workspace_internal, workspaceName)
     Column(
         Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("手机本地 Runtime · $workspaceLabel", style = OcType.body, color = c.ink)
+        Text(stringResource(R.string.setup_local_runtime_info, workspaceLabel), style = OcType.body, color = c.ink)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.Center) {
             Text("→ ", style = OcType.mono, color = c.ink4)
@@ -419,7 +421,7 @@ private fun LocalEndpointPreview(workspaceName: String, usesExternalFolder: Bool
             Text("4097", style = OcType.mono, color = c.accent)
         }
         Spacer(Modifier.height(8.dp))
-        Text("不需要先连接局域网服务器", style = OcType.secondary, color = c.ink4)
+        Text(stringResource(R.string.setup_no_lan_needed), style = OcType.secondary, color = c.ink4)
     }
 }
 

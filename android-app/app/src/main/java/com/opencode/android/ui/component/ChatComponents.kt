@@ -33,6 +33,8 @@ import com.opencode.android.ui.screen.chat.MessagePhase
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcUserBubbleShape
 import com.opencode.android.ui.theme.OcType
+import androidx.compose.ui.res.stringResource
+import com.opencode.android.R
 
 @Composable
 fun MessageBubble(
@@ -146,7 +148,7 @@ fun MessageBubble(
             Column(Modifier.fillMaxWidth(0.92f)) {
                 // Signature line — shows agent name when routed to subagent
                 val agentName = message.agent
-                val isSub = agentName != null && agentName != "orchestrator"
+                val isSub = agentName != null && agentName != "orchestrator" && agentName != "build" && agentName != "plan"
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -174,7 +176,7 @@ fun MessageBubble(
                                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     ) {
                                         OnlineDot()
-                                        Text("Thinking…", style = OcType.mono, color = c.ink3)
+                                        Text(stringResource(R.string.chat_thinking), style = OcType.mono, color = c.ink3)
                                     }
                                     Spacer(Modifier.height(6.dp))
                                 }
@@ -257,8 +259,8 @@ fun MessageBubble(
 private fun UserImageAttachment(bitmap: androidx.compose.ui.graphics.ImageBitmap) {
     var showOverlay by remember { mutableStateOf(false) }
 
-    Image(
-        bitmap, "attached image",
+        Image(
+        bitmap, stringResource(R.string.cd_attached_image),
         Modifier
             .padding(top = 6.dp)
             .widthIn(max = 140.dp)
@@ -402,7 +404,7 @@ private fun SubagentCapsule(agent: String, status: String, onClick: (() -> Unit)
             color = c.accent,
         )
         Text(
-            if (isRunning) "running" else "done",
+            if (isRunning) stringResource(R.string.chat_running) else stringResource(R.string.chat_done),
             style = OcType.mono.copy(fontSize = 10.sp),
             color = c.ink4,
         )
@@ -459,13 +461,13 @@ fun EmptyChatState(onSuggestionClick: (String) -> Unit) {
             BlinkingCursor(color = c.accent)
         }
         Spacer(Modifier.height(20.dp))
-        Text("What would you like to build?", style = OcType.titleL, color = c.ink)
+        Text(stringResource(R.string.chat_empty_prompt), style = OcType.titleL, color = c.ink)
         Spacer(Modifier.height(28.dp))
 
         val suggestions = listOf(
-            "Explain this codebase",
-            "Find bugs in my code",
-            "Write a new feature",
+            stringResource(R.string.chat_suggest_explain),
+            stringResource(R.string.chat_suggest_bugs),
+            stringResource(R.string.chat_suggest_feature),
         )
         suggestions.forEach { text ->
             Box(

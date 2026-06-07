@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcButtonShape
 import com.opencode.android.ui.theme.OcType
+import androidx.compose.ui.res.stringResource
+import com.opencode.android.R
 
 /* =============================================================================
  * 下划线输入框 —— Plain 的标志:无盒子,只底部 1px 线;聚焦变绿。
@@ -128,7 +130,7 @@ fun OcButton(
         ) {
             if (loading) {
                 OnlineDot()
-                Text("connecting…", style = OcType.mono, color = fg)
+                Text(stringResource(R.string.chat_connecting), style = OcType.mono, color = fg)
             } else {
                 leading?.invoke()
                 Text(text, style = OcType.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = fg)

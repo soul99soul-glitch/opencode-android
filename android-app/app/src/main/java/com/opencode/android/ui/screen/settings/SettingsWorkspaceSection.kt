@@ -3,7 +3,9 @@ package com.opencode.android.ui.screen.settings
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.opencode.android.R
 import com.opencode.android.data.api.WorkspaceOption
 import com.opencode.android.ui.component.WorkspacePicker
 
@@ -18,7 +20,7 @@ internal fun SettingsWorkspaceSection(
     onSelect: (String) -> Unit,
     onTogglePinned: (String) -> Unit,
 ) {
-    SectionHeader("WORKSPACE")
+    SectionHeader(stringResource(R.string.settings_section_workspace))
     WorkspacePicker(
         options = workspaces,
         selectedPath = selectedPath,

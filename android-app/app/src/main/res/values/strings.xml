@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand -->
+    <string name="app_name">OpenCode</string>
+
+    <!-- ============================================================ -->
+    <!-- Settings Screen -->
+    <!-- ============================================================ -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_mode">MODE</string>
+    <string name="settings_section_server">SERVER</string>
+    <string name="settings_section_runtime">RUNTIME</string>
+    <string name="settings_section_appearance">APPEARANCE</string>
+    <string name="settings_section_agent">AGENT</string>
+    <string name="settings_section_about">ABOUT</string>
+    <string name="settings_section_connection">CONNECTION</string>
+    <string name="settings_section_provider">PROVIDER</string>
+    <string name="settings_section_workspace">WORKSPACE</string>
+    <string name="settings_section_language">LANGUAGE</string>
+
+    <string name="settings_label_connection">Connection</string>
+    <string name="settings_label_host">Host</string>
+    <string name="settings_label_port">Port</string>
+    <string name="settings_label_password">Password</string>
+    <string name="settings_label_runtime">Runtime</string>
+    <string name="settings_label_bundled_port">Bundled Port</string>
+    <string name="settings_label_external_port">External Port</string>
+    <string name="settings_label_workspace">Workspace</string>
+    <string name="settings_label_directory">Directory</string>
+    <string name="settings_label_endpoint">Endpoint</string>
+    <string name="settings_label_runtime_apk">Runtime APK</string>
+    <string name="settings_label_theme">Theme</string>
+    <string name="settings_label_accent">Accent</string>
+    <string name="settings_label_language">Language</string>
+    <string name="settings_label_version">Version</string>
+    <string name="settings_label_opencode_version">OpenCode Version</string>
+    <string name="settings_label_runtime_mode">Runtime Mode</string>
+    <string name="settings_label_device">Device</string>
+    <string name="settings_label_status">Status</string>
+    <string name="settings_label_mode">Mode</string>
+
+    <string name="settings_value_bundled">Bundled</string>
+    <string name="settings_value_external">External</string>
+    <string name="settings_value_saved">Saved</string>
+    <string name="settings_value_loading">loading</string>
+    <string name="settings_value_light">Light</string>
+    <string name="settings_value_dark">Dark</string>
+    <string name="settings_value_on">On</string>
+    <string name="settings_value_off">Off</string>
+
+    <string name="settings_action_browse">Browse</string>
+    <string name="settings_action_hide">Hide</string>
+    <string name="settings_action_app">App</string>
+    <string name="settings_action_clear">Clear</string>
+    <string name="settings_action_apply">Apply</string>
+    <string name="settings_action_health">Health</string>
+    <string name="settings_action_start">Start</string>
+    <string name="settings_action_stop">Stop</string>
+    <string name="settings_action_battery">Battery</string>
+    <string name="settings_action_disconnect">Disconnect</string>
+
+    <string name="settings_lang_english">English</string>
+    <string name="settings_lang_chinese">简体中文</string>
+
+    <string name="settings_placeholder_empty">—</string>
+    <string name="settings_placeholder_password">••••••••</string>
+    <string name="settings_placeholder_password_hint">Optional</string>
+
+    <string name="settings_external_folder_info">External folder · contains .git/.env and hidden files, changes sync automatically</string>
+    <string name="settings_legacy_apk_warning">Legacy companion APK detected (%s). Uninstall it to avoid port conflicts.</string>
+
+    <!-- Status messages -->
+    <string name="status_saved">Saved</string>
+    <string name="status_saved_runtime_not_ready">Saved; runtime is not ready</string>
+    <string name="status_runtime_ready">Runtime ready</string>
+    <string name="status_runtime_starting">Runtime starting</string>
+    <string name="status_runtime_restarting">Runtime restarting</string>
+    <string name="status_runtime_start_failed">Runtime start failed</string>
+    <string name="status_runtime_restart_failed">Runtime restart failed</string>
+    <string name="status_runtime_stop_requested">Runtime stop requested</string>
+    <string name="status_runtime_stop_failed">Runtime stop failed</string>
+    <string name="status_battery_prompt_opened">Battery prompt opened</string>
+    <string name="status_battery_prompt_failed">Battery prompt failed</string>
+    <string name="status_api_key_cleared">API key cleared</string>
+    <string name="status_api_key_cleared_not_ready">API key cleared; runtime is not ready</string>
+    <string name="status_failed_save_provider">Failed to save provider</string>
+    <string name="status_failed_save_mcp">Failed to save MCP/plugins</string>
+    <string name="status_sync_failed">Sync failed</string>
+    <string name="status_sync_up_to_date">Already up to date</string>
+    <string name="status_sync_with_native">Synced with native config</string>
+    <string name="status_mcp_names_must_unique">MCP names must be unique</string>
+    <string name="status_fetching_models">Fetching models</string>
+    <string name="status_auto_fetching_models">Auto fetching models</string>
+    <string name="status_model_selected">Model selected</string>
+    <string name="status_bundled_port_invalid">Bundled port must be 1-65535</string>
+    <string name="status_external_port_invalid">External port must be 1-65535</string>
+    <string name="status_failed_load_workspaces">Failed to load workspaces</string>
+    <string name="status_unavailable">Unavailable</string>
+    <string name="status_no_configured_providers">No configured providers</string>
+    <string name="status_linked_external_folder">External folder linked</string>
+
+    <!-- ============================================================ -->
+    <!-- Setup Screen -->
+    <!-- ============================================================ -->
+    <string name="setup_connect_lan">Connect to LAN OpenCode</string>
+    <string name="setup_use_local">Use local OpenCode</string>
+    <string name="setup_mode_lan">LAN</string>
+    <string name="setup_mode_local">Local</string>
+    <string name="setup_field_server_url">> SERVER URL</string>
+    <string name="setup_field_port">> PORT</string>
+    <string name="setup_field_password">> PASSWORD</string>
+    <string name="setup_field_directory">> DIRECTORY</string>
+    <string name="setup_field_workspace">> WORKSPACE</string>
+    <string name="setup_placeholder_password">Optional</string>
+    <string name="setup_placeholder_directory">~/projects/opencode</string>
+    <string name="setup_placeholder_workspace">default</string>
+    <string name="setup_action_load">Load</string>
+    <string name="setup_action_pick">Pick</string>
+    <string name="setup_action_browse">Browse</string>
+    <string name="setup_action_connect_lan">Connect LAN</string>
+    <string name="setup_action_start_local">Start Local</string>
+    <string name="setup_external_folder_info">External folder selected · contains hidden files, changes sync automatically</string>
+    <string name="setup_local_runtime_info">Local Runtime · %s</string>
+    <string name="setup_no_lan_needed">No need to connect to a LAN server first</string>
+    <string name="setup_error_server_unhealthy">Server unhealthy</string>
+    <string name="setup_error_local_failed">Local runtime failed to start</string>
+    <string name="setup_error_connection_failed">Connection failed: %s</string>
+    <string name="setup_error_load_workspaces">Failed to load workspaces</string>
+    <string name="setup_workspace_external">External: %s</string>
+    <string name="setup_workspace_internal">Internal: %s</string>
+
+    <!-- ============================================================ -->
+    <!-- Sessions Screen -->
+    <!-- ============================================================ -->
+    <string name="sessions_status_online">online</string>
+    <string name="sessions_count">%d sessions</string>
+    <string name="sessions_count_overflow">99+ sessions</string>
+    <string name="sessions_msg_count">%d msgs</string>
+    <string name="sessions_empty_title">No conversations yet</string>
+    <string name="sessions_suggestion_explain">Explain this codebase</string>
+    <string name="sessions_suggestion_bugs">Find bugs</string>
+    <string name="sessions_suggestion_feature">Write a feature</string>
+    <string name="sessions_suggestion_refactor">Refactor code</string>
+    <string name="sessions_new_session">+ New session</string>
+    <string name="sessions_action_refresh">Refresh</string>
+    <string name="sessions_action_settings">Settings</string>
+    <string name="sessions_action_delete">Delete</string>
+    <string name="sessions_action_retry">Retry</string>
+    <string name="sessions_error_label">Error</string>
+    <string name="sessions_error_local_failed">Local runtime failed to start</string>
+
+    <!-- Relative time -->
+    <string name="time_just_now">just now</string>
+    <string name="time_minutes_ago">%d min ago</string>
+    <string name="time_hours_ago">%d hr ago</string>
+    <string name="time_yesterday">yesterday</string>
+    <string name="time_days_ago">%d days ago</string>
+    <string name="time_date_format">MMM d</string>
+
+    <!-- ============================================================ -->
+    <!-- Chat Screen -->
+    <!-- ============================================================ -->
+    <string name="chat_new_session">New session</string>
+    <string name="chat_input_placeholder">Ask opencode…</string>
+    <string name="chat_input_prompt_placeholder">Type to prompt %s…</string>
+    <string name="chat_panel_subtask">SUBTASK</string>
+    <string name="chat_panel_commands">COMMANDS</string>
+    <string name="chat_panel_skills">SKILLS</string>
+    <string name="chat_no_matching_skills">No matching skills</string>
+    <string name="chat_loading_agents">Loading agents…</string>
+    <string name="chat_no_response">No response received — server may have failed to process the prompt</string>
+    <string name="chat_unexpected_response">Unexpected server response</string>
+
+    <!-- Command descriptions -->
+    <string name="chat_cmd_review">Code review</string>
+    <string name="chat_cmd_fix">Fix bugs</string>
+    <string name="chat_cmd_find">Search codebase</string>
+    <string name="chat_cmd_explain">Explain code</string>
+    <string name="chat_cmd_plan">Create plan</string>
+
+    <!-- Chat components -->
+    <string name="chat_thinking">Thinking…</string>
+    <string name="chat_thinking_collapsed">Thinking</string>
+    <string name="chat_chars_count">%d chars</string>
+    <string name="chat_empty_prompt">What would you like to build?</string>
+    <string name="chat_suggest_explain">Explain this codebase</string>
+    <string name="chat_suggest_bugs">Find bugs in my code</string>
+    <string name="chat_suggest_feature">Write a new feature</string>
+    <string name="chat_connecting">connecting…</string>
+    <string name="chat_running">running</string>
+    <string name="chat_done">done</string>
+
+    <!-- Agent short names (3-char abbreviations) -->
+    <string name="agent_short_orch">Orch</string>
+    <string name="agent_short_build">Bld</string>
+    <string name="agent_short_plan">Plan</string>
+    <string name="agent_short_design">Dsn</string>
+    <string name="agent_short_fix">Fix</string>
+    <string name="agent_short_explore">Exp</string>
+    <string name="agent_short_librarian">Lib</string>
+    <string name="agent_short_oracle">Ora</string>
+    <string name="agent_short_council">Cou</string>
+    <string name="agent_short_coder">Code</string>
+
+    <!-- ============================================================ -->
+    <!-- Settings sub-sections -->
+    <!-- ============================================================ -->
+    <string name="mcp_section_title">MCP &amp; PLUGINS</string>
+    <string name="mcp_add_remote">+ Add remote MCP</string>
+    <string name="mcp_plugins_label">Plugins (npm specs, one per line)</string>
+    <string name="mcp_plugins_placeholder">opencode-plugin-foo\n@scope/bar@1.2.3</string>
+    <string name="mcp_default_plugins">Default plugins</string>
+    <string name="mcp_refresh_from_agent">Refresh from agent</string>
+    <string name="mcp_sync_info">Bidirectional sync with files/.config/opencode · remote MCP (HTTP/SSE) only</string>
+
+    <string name="local_provider_section_title">LOCAL PROVIDER</string>
+    <string name="local_provider_enable">Enable</string>
+    <string name="local_provider_api_base">API Base</string>
+    <string name="local_provider_coding_base">Coding Base</string>
+    <string name="local_provider_api_key">API Key</string>
+    <string name="local_provider_model">Model</string>
+    <string name="local_provider_fetching">Fetching…</string>
+    <string name="local_provider_choose">Choose…</string>
+    <string name="local_provider_loading_models">Loading models…</string>
+    <string name="local_provider_no_models">No models yet</string>
+    <string name="local_provider_selected">selected</string>
+    <string name="local_provider_select">select</string>
+    <string name="local_provider_use">Use</string>
+    <string name="local_provider_default">Default</string>
+    <string name="local_provider_models">Models</string>
+    <string name="local_provider_fetching_models">fetching…</string>
+    <string name="local_provider_retry">Retry</string>
+    <string name="local_provider_loading">Loading…</string>
+    <string name="local_provider_select_model">Select…</string>
+
+    <string name="agent_default_agent">Default Agent</string>
+
+    <string name="workspace_section_title">WORKSPACES</string>
+    <string name="workspace_pinned">PINNED</string>
+    <string name="workspace_all">ALL</string>
+    <string name="workspace_sessions_count">%d sessions</string>
+    <string name="workspace_current">current</string>
+    <string name="workspace_open">open</string>
+
+    <!-- MCP field placeholders -->
+    <string name="mcp_field_name">name</string>
+    <string name="mcp_field_url_placeholder">https://mcp.example.com/sse</string>
+    <string name="mcp_token_saved">token: saved (leave blank to keep)</string>
+    <string name="mcp_token_placeholder">bearer token (optional)</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_refresh">Refresh</string>
+    <string name="cd_settings">Settings</string>
+    <string name="cd_delete">Delete</string>
+    <string name="cd_attached_image">attached image</string>
+
+    <!-- Workspace errors -->
+    <string name="error_external_folder_permission_lost">External folder access permission has expired. Please re-select the folder in Settings.</string>
+
+    <!-- Dynamic status messages -->
+    <string name="status_health_version">Healthy %s</string>
+    <string name="status_synced_from_agent">Synced from agent: MCP %s · plugins %s</string>
+    <string name="status_imported_from_agent">Imported from agent: %s %s</string>
+    <string name="status_fetched_models">Fetched %d models from %s; choose one</string>
+    <string name="status_model_fetch_failed">Model fetch failed: %s</string>
+    <string name="status_mcp_saved_plugins_from_agent">From agent: %s</string>
+</resources>

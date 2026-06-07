@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screen
 
+import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -17,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
@@ -26,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import com.opencode.android.R
 import com.opencode.android.data.api.LocalProviderModelFetcher
 import com.opencode.android.data.api.OpenCodeApi
 import com.opencode.android.data.api.WorkspaceOption
@@ -82,6 +85,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     val accentIndex by appearance.accentIndex.collectAsState(initial = 0)
     val scope = rememberCoroutineScope()
     val runtimeClient = remember { RuntimeCompanionClient(context) }
+    var openCodeVersion by remember { mutableStateOf<String?>(null) }
     var runtimeStatusVersion by remember { mutableStateOf(0) }
     val runtimeStatus = remember(runtimeStatusVersion) { runtimeClient.status() }
     val bundledAvailable = runtimeStatus.canStart
@@ -124,7 +128,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                     workspaceTreeUri = selection.treeUri,
                 ),
             )
-            localStatus = "已关联外部文件夹"
+            localStatus = context.getString(R.string.status_linked_external_folder)
         }
     }
     val localWorkspaceCandidates = remember(localWorkspaceNames, localWorkspaceDraft) {
@@ -138,8 +142,8 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     val bundledPortValid = bundledPortDraft.toIntOrNull()?.let { it in 1..65535 } == true
     val externalPortValid = externalPortDraft.toIntOrNull()?.let { it in 1..65535 } == true
     val localValidationMessage = when {
-        !bundledPortValid -> "Bundled port must be 1-65535"
-        !externalPortValid -> "External port must be 1-65535"
+        !bundledPortValid -> context.getString(R.string.status_bundled_port_invalid)
+        !externalPortValid -> context.getString(R.string.status_external_port_invalid)
         else -> null
     }
 
@@ -230,7 +234,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         try {
             api.fetchWorkspaceOptions()
                 .onSuccess { workspaces = it }
-                .onFailure { workspaceError = it.message ?: "Failed to load workspaces" }
+                .onFailure { workspaceError = it.message ?: context.getString(R.string.status_failed_load_workspaces) }
         } finally {
             api.close()
             isLoadingWorkspaces = false
@@ -243,8 +247,11 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             val api = OpenCodeApi(endpoint)
             try {
                 api.health()
-                    .onSuccess { localStatus = "Healthy ${it.version}".trim() }
-                    .onFailure { localStatus = it.message ?: "Unavailable" }
+                    .onSuccess { health ->
+                        openCodeVersion = health.version
+                        localStatus = context.getString(R.string.status_health_version, health.version)
+                    }
+                    .onFailure { localStatus = it.message ?: context.getString(R.string.status_unavailable) }
             } finally {
                 api.close()
             }
@@ -256,7 +263,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             localStatus = runtimeStatus.message
             return false
         }
-        localStatus = if (restart) "Runtime restarting" else "Runtime starting"
+        localStatus = if (restart) context.getString(R.string.status_runtime_restarting) else context.getString(R.string.status_runtime_starting)
         val providerProfile = prefs.localProviderProfile.first()
         val providerApiKey = if (providerProfile.hasApiKey) prefs.getLocalProviderApiKey(providerProfile.presetId) else ""
         val serverPassword = prefs.getOrCreateLocalServerPassword()
@@ -281,10 +288,10 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         }
         result
             .onSuccess {
-                localStatus = "Runtime ready"
+                localStatus = context.getString(R.string.status_runtime_ready)
                 runtimeStatusVersion++
             }
-            .onFailure { localStatus = it.message ?: if (restart) "Runtime restart failed" else "Runtime start failed" }
+            .onFailure { localStatus = it.message ?: if (restart) context.getString(R.string.status_runtime_restart_failed) else context.getString(R.string.status_runtime_start_failed) }
         return result.isSuccess
     }
 
@@ -307,15 +314,15 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
 
     fun stopBundledService() {
         runtimeClient.stop()
-            .onSuccess { localStatus = "Runtime stop requested" }
-            .onFailure { localStatus = it.message ?: "Runtime stop failed" }
+            .onSuccess { localStatus = context.getString(R.string.status_runtime_stop_requested) }
+            .onFailure { localStatus = it.message ?: context.getString(R.string.status_runtime_stop_failed) }
         runtimeStatusVersion++
     }
 
     fun requestRuntimeBatteryExemption() {
         runtimeClient.requestBatteryExemption()
-            .onSuccess { localStatus = "Battery prompt opened" }
-            .onFailure { localStatus = it.message ?: "Battery prompt failed" }
+            .onSuccess { localStatus = context.getString(R.string.status_battery_prompt_opened) }
+            .onFailure { localStatus = it.message ?: context.getString(R.string.status_battery_prompt_failed) }
     }
 
     fun applyLocalProvider() {
@@ -338,12 +345,12 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 providerApiKeyDraft = ""
                 providerHasSavedKey = nextProfile.hasApiKey
                 providerStatus = if (restartApplied) {
-                    "Saved"
+                    context.getString(R.string.status_saved)
                 } else {
-                    "Saved; runtime is not ready"
+                    context.getString(R.string.status_saved_runtime_not_ready)
                 }
             } catch (e: Exception) {
-                providerStatus = e.message ?: "Failed to save provider"
+                providerStatus = e.message ?: context.getString(R.string.status_failed_save_provider)
             }
         }
     }
@@ -359,9 +366,9 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 true
             }
             providerStatus = if (restartApplied) {
-                "API key cleared"
+                context.getString(R.string.status_api_key_cleared)
             } else {
-                "API key cleared; runtime is not ready"
+                context.getString(R.string.status_api_key_cleared_not_ready)
             }
         }
     }
@@ -372,12 +379,12 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 val result = prefs.syncMcpAndPluginsFromNative()
                 mcpStatus = when {
                     result.importedMcpNames.isNotEmpty() || result.importedPluginSpecs.isNotEmpty() ->
-                        "Synced from agent: MCP ${result.importedMcpNames.joinToString()} · plugins ${result.importedPluginSpecs.joinToString()}"
-                    result.changed -> "Synced with native config"
-                    else -> "Already up to date"
+                        context.getString(R.string.status_synced_from_agent, result.importedMcpNames.joinToString(), result.importedPluginSpecs.joinToString())
+                    result.changed -> context.getString(R.string.status_sync_with_native)
+                    else -> context.getString(R.string.status_sync_up_to_date)
                 }
             } catch (e: Exception) {
-                mcpStatus = e.message ?: "Sync failed"
+                mcpStatus = e.message ?: context.getString(R.string.status_sync_failed)
             }
         }
     }
@@ -391,7 +398,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             }
             val names = rows.map { it.name.trim() }
             if (names.size != names.toSet().size) {
-                mcpStatus = "MCP names must be unique"
+                mcpStatus = context.getString(R.string.status_mcp_names_must_unique)
                 return@launch
             }
             try {
@@ -420,9 +427,9 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 } else {
                     true
                 }
-                mcpStatus = if (applied) "Saved" else "Saved; runtime is not ready"
+                mcpStatus = if (applied) context.getString(R.string.status_saved) else context.getString(R.string.status_saved_runtime_not_ready)
             } catch (e: Exception) {
-                mcpStatus = e.message ?: "Failed to save MCP/plugins"
+                mcpStatus = e.message ?: context.getString(R.string.status_failed_save_mcp)
             }
         }
     }
@@ -440,7 +447,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 workspaceTreeUri = localTreeUriDraft,
             )
             prefs.saveLocalProfile(updated)
-            localStatus = "Saved"
+            localStatus = context.getString(R.string.status_saved)
             if (mode == ConnectionMode.LOCAL_BUNDLED && bundledAvailable) {
                 startBundledService()
             }
@@ -493,7 +500,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     suspend fun fetchProviderModelsNow(auto: Boolean) {
         if (isFetchingProviderModels) return
         isFetchingProviderModels = true
-        providerStatus = if (auto) "Auto fetching models" else "Fetching models"
+        providerStatus = if (auto) context.getString(R.string.status_auto_fetching_models) else context.getString(R.string.status_fetching_models)
         val key = providerApiKeyDraft.trim().ifBlank {
             if (providerHasSavedKey) prefs.getLocalProviderApiKey(providerPresetIdDraft) else ""
         }.trim()
@@ -506,9 +513,9 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             .onSuccess { result ->
                 fetchedProviderModels = result.models
                 providerActiveBaseUrlDraft = result.baseUrl
-                providerStatus = "Fetched ${result.models.size} models from ${result.sourceLabel}; choose one"
+                providerStatus = context.getString(R.string.status_fetched_models, result.models.size, result.sourceLabel)
             }
-            .onFailure { providerStatus = "Model fetch failed: ${it.message ?: "unknown error"}" }
+            .onFailure { providerStatus = context.getString(R.string.status_model_fetch_failed, it.message ?: "unknown") }
         isFetchingProviderModels = false
     }
 
@@ -521,7 +528,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     fun selectProviderModel(modelId: String) {
         providerModelsDraft = modelId
         showProviderModelPicker = false
-        providerStatus = "Model selected"
+        providerStatus = context.getString(R.string.status_model_selected)
     }
 
     // Load providers + agents from the active endpoint.
@@ -540,6 +547,8 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 .onSuccess { providers = it }
             api.fetchAgents()
                 .onSuccess { all -> availableAgents = all.filter { it.mode == "primary" && !it.hidden } }
+            // Fetch health to populate OpenCode version in About section
+            api.health().onSuccess { openCodeVersion = it.version }
         } finally {
             api.close()
         }
@@ -554,7 +563,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         runCatching { prefs.syncMcpAndPluginsFromNative() }
             .onSuccess { result ->
                 if (result.importedMcpNames.isNotEmpty() || result.importedPluginSpecs.isNotEmpty()) {
-                    mcpStatus = "Imported from agent: ${result.importedMcpNames.joinToString()} ${result.importedPluginSpecs.joinToString()}"
+                    mcpStatus = context.getString(R.string.status_imported_from_agent, result.importedMcpNames.joinToString(), result.importedPluginSpecs.joinToString())
                 }
             }
     }
@@ -601,35 +610,35 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 Text("←", style = OcType.title, color = c.ink)
             }
             Spacer(Modifier.width(4.dp))
-            Text("Settings", style = OcType.titleL, color = c.ink)
+            Text(stringResource(R.string.settings_title), style = OcType.titleL, color = c.ink)
         }
 
         Spacer(Modifier.height(8.dp))
 
         // ── MODE ──
-        SectionHeader("MODE")
+        SectionHeader(stringResource(R.string.settings_section_mode))
         SettingsCard {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Connection", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.settings_label_connection), style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
                 ModeCycleButton(label = mode.shortLabel(), c = c) { cycleConnectionMode() }
             }
         }
 
         if (mode == ConnectionMode.LAN) {
             Spacer(Modifier.height(10.dp))
-            SectionHeader("SERVER")
+            SectionHeader(stringResource(R.string.settings_section_server))
             SettingsCard {
                 EditableSettingsRow(
-                    label = "Host",
+                    label = stringResource(R.string.settings_label_host),
                     value = lanHostDraft,
                     onValueChange = { lanHostDraft = it },
                 )
                 Hairline()
                 EditableSettingsRow(
-                    label = "Port",
+                    label = stringResource(R.string.settings_label_port),
                     value = lanPortDraft,
                     keyboardType = KeyboardType.Number,
                     onValueChange = { lanPortDraft = it.filter(Char::isDigit).take(5) },
@@ -640,7 +649,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "Password",
+                        stringResource(R.string.settings_label_password),
                         style = OcType.body,
                         color = c.ink,
                         maxLines = 1,
@@ -661,7 +670,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                                 if (lanPasswordDraft.isBlank()) {
                                     Text(
-                                        if (lanHasSavedPassword) "Saved" else "—",
+                                        if (lanHasSavedPassword) stringResource(R.string.settings_value_saved) else stringResource(R.string.settings_placeholder_empty),
                                         style = OcType.mono,
                                         color = if (lanHasSavedPassword) c.ink2 else c.ink4,
                                         textAlign = TextAlign.End,
@@ -679,7 +688,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                                 lanHasSavedPassword = false
                             }.padding(horizontal = 4.dp, vertical = 2.dp),
                         ) {
-                            Text("Clear", style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
+                            Text(stringResource(R.string.settings_action_clear), style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
                         }
                     }
                 }
@@ -689,24 +698,24 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         if (mode != ConnectionMode.LAN) {
             Spacer(Modifier.height(10.dp))
             SettingsCard {
-                SettingsRow("Runtime", if (mode == ConnectionMode.LOCAL_BUNDLED) "Bundled" else "External")
+                SettingsRow(stringResource(R.string.settings_label_runtime), if (mode == ConnectionMode.LOCAL_BUNDLED) stringResource(R.string.settings_value_bundled) else stringResource(R.string.settings_value_external))
                 Hairline()
                 EditableSettingsRow(
-                    label = "Bundled Port",
+                    label = stringResource(R.string.settings_label_bundled_port),
                     value = bundledPortDraft,
                     keyboardType = KeyboardType.Number,
                     onValueChange = { bundledPortDraft = it.filter(Char::isDigit).take(5) },
                 )
                 Hairline()
                 EditableSettingsRow(
-                    label = "External Port",
+                    label = stringResource(R.string.settings_label_external_port),
                     value = externalPortDraft,
                     keyboardType = KeyboardType.Number,
                     onValueChange = { externalPortDraft = it.filter(Char::isDigit).take(5) },
                 )
                 Hairline()
                 EditableSettingsRow(
-                    label = if (mode == ConnectionMode.LOCAL_BUNDLED) "Workspace" else "Directory",
+                    label = if (mode == ConnectionMode.LOCAL_BUNDLED) stringResource(R.string.settings_label_workspace) else stringResource(R.string.settings_label_directory),
                     value = localWorkspaceDraft,
                     onValueChange = {
                         localWorkspaceDraft = if (mode == ConnectionMode.LOCAL_BUNDLED) sanitizeLocalWorkspaceName(it) else it
@@ -714,8 +723,8 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                     trailing = if (mode == ConnectionMode.LOCAL_BUNDLED) {
                         {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                InlineAction("Browse") { pickExternalFolder() }
-                                InlineAction(if (showLocalWorkspacePicker) "Hide" else "App") {
+                                InlineAction(stringResource(R.string.settings_action_browse)) { pickExternalFolder() }
+                                InlineAction(if (showLocalWorkspacePicker) stringResource(R.string.settings_action_hide) else stringResource(R.string.settings_action_app)) {
                                     showLocalWorkspacePicker = !showLocalWorkspacePicker
                                 }
                             }
@@ -725,7 +734,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 if (mode == ConnectionMode.LOCAL_BUNDLED && localTreeUriDraft.isNotBlank()) {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
                         Text(
-                            "外部文件夹 · 含 .git/.env 等隐藏文件，增删改会自动同步",
+                            stringResource(R.string.settings_external_folder_info),
                             style = OcType.mono.copy(fontSize = 11.sp),
                             color = c.ink3,
                         )
@@ -765,13 +774,13 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                     }
                 }
                 Hairline()
-                SettingsRow("Endpoint", activeEndpoint?.displayUrl ?: "loading")
+                SettingsRow(stringResource(R.string.settings_label_endpoint), activeEndpoint?.displayUrl ?: stringResource(R.string.settings_value_loading))
                 Hairline()
-                SettingsRow("Runtime APK", runtimeStatus.message)
+                SettingsRow(stringResource(R.string.settings_label_runtime_apk), runtimeStatus.message)
                 if (legacyCompanionInstalled) {
                     Hairline()
                     Text(
-                        "Legacy companion APK detected (${LegacyRuntimeCompanion.PACKAGE_NAME}). Uninstall it to avoid port conflicts.",
+                        stringResource(R.string.settings_legacy_apk_warning, LegacyRuntimeCompanion.PACKAGE_NAME),
                         style = OcType.mono.copy(fontSize = 11.sp),
                         color = c.accent,
                         modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
@@ -786,31 +795,31 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        LocalAction("Apply", enabled = localValidationMessage == null, modifier = Modifier.weight(1f)) { saveLocalDrafts() }
-                        LocalAction("Health", enabled = true, modifier = Modifier.weight(1f)) { checkActiveHealth() }
+                        LocalAction(stringResource(R.string.settings_action_apply), enabled = localValidationMessage == null, modifier = Modifier.weight(1f)) { saveLocalDrafts() }
+                        LocalAction(stringResource(R.string.settings_action_health), enabled = true, modifier = Modifier.weight(1f)) { checkActiveHealth() }
                     }
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         LocalAction(
-                            "Start",
+                            stringResource(R.string.settings_action_start),
                             enabled = mode == ConnectionMode.LOCAL_BUNDLED && bundledAvailable,
                             modifier = Modifier.weight(1f),
                         ) { startBundledService() }
                         LocalAction(
-                            "Stop",
+                            stringResource(R.string.settings_action_stop),
                             enabled = mode == ConnectionMode.LOCAL_BUNDLED,
                             modifier = Modifier.weight(1f),
                         ) { stopBundledService() }
                         LocalAction(
-                            "Battery",
+                            stringResource(R.string.settings_action_battery),
                             enabled = mode == ConnectionMode.LOCAL_BUNDLED && bundledAvailable,
                             modifier = Modifier.weight(1f),
                         ) { requestRuntimeBatteryExemption() }
                     }
                     Text(
-                        localValidationMessage ?: localStatus ?: "—",
+                        localValidationMessage ?: localStatus ?: stringResource(R.string.settings_placeholder_empty),
                         style = OcType.mono.copy(fontSize = 11.sp),
                         color = if (localValidationMessage == null) c.ink3 else c.accent,
                     )
@@ -882,16 +891,16 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
 
         if (mode == ConnectionMode.LAN || mode == ConnectionMode.LOCAL_EXTERNAL) {
             Spacer(Modifier.height(22.dp))
-            SectionHeader("PROVIDER")
+            SectionHeader(stringResource(R.string.settings_section_provider))
             SettingsCard {
                 if (providers.isEmpty()) {
-                    SettingsRow("Status", "No configured providers")
+                    SettingsRow(stringResource(R.string.settings_label_status), stringResource(R.string.status_no_configured_providers))
                 } else {
                     providers.forEachIndexed { index, provider ->
                         if (index > 0) Hairline()
                         SettingsRow(
                             label = provider.name.ifBlank { provider.id },
-                            value = provider.models.keys.joinToString(", ").ifBlank { "—" },
+                            value = provider.models.keys.joinToString(", ").ifBlank { stringResource(R.string.settings_placeholder_empty) },
                         )
                     }
                 }
@@ -901,17 +910,17 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         Spacer(Modifier.height(22.dp))
 
         // ── CONNECTION ──
-        SectionHeader("CONNECTION")
+        SectionHeader(stringResource(R.string.settings_section_connection))
         SettingsCard {
-            SettingsRow("Endpoint", activeEndpoint?.displayUrl ?: "loading")
+            SettingsRow(stringResource(R.string.settings_label_endpoint), activeEndpoint?.displayUrl ?: stringResource(R.string.settings_value_loading))
             Hairline()
-            SettingsRow("Mode", mode.name.lowercase().replace('_', ' '))
+            SettingsRow(stringResource(R.string.settings_label_mode), mode.name.lowercase().replace('_', ' '))
             Hairline()
-            SettingsRow("Password", if (activeEndpoint?.password.isNullOrBlank()) "—" else "••••••••")
+            SettingsRow(stringResource(R.string.settings_label_password), if (activeEndpoint?.password.isNullOrBlank()) stringResource(R.string.settings_placeholder_empty) else stringResource(R.string.settings_placeholder_password))
             Hairline()
             SettingsRow(
-                if (mode == ConnectionMode.LAN) "Directory" else "Workspace",
-                activeEndpoint?.let { WorkspaceDisplay.endpointDirectoryLabel(it) } ?: "—",
+                if (mode == ConnectionMode.LAN) stringResource(R.string.settings_label_directory) else stringResource(R.string.settings_label_workspace),
+                activeEndpoint?.let { WorkspaceDisplay.endpointDirectoryLabel(it) } ?: stringResource(R.string.settings_placeholder_empty),
             )
         }
 
@@ -940,7 +949,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         }
 
         // ── APPEARANCE ──
-        SectionHeader("APPEARANCE")
+        SectionHeader(stringResource(R.string.settings_section_appearance))
 
         // Theme segmented control
         SettingsCard {
@@ -948,7 +957,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Theme", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.settings_label_theme), style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
                 // Light / Dark / System segmented
                 Row(
                     Modifier
@@ -956,10 +965,10 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    ThemeOption("Light", darkTheme == false, c) {
+                    ThemeOption(stringResource(R.string.settings_value_light), darkTheme == false, c) {
                         scope.launch { appearance.setDark(false) }
                     }
-                    ThemeOption("Dark", darkTheme == true, c) {
+                    ThemeOption(stringResource(R.string.settings_value_dark), darkTheme == true, c) {
                         scope.launch { appearance.setDark(true) }
                     }
                 }
@@ -974,7 +983,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Accent", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.settings_label_accent), style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OcAccent.entries.forEachIndexed { index, accent ->
                         val selected = index == accentIndex
@@ -1015,6 +1024,50 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             }
         }
 
+        Spacer(Modifier.height(10.dp))
+
+        // ── LANGUAGE ──
+        SectionHeader(stringResource(R.string.settings_section_language))
+        SettingsCard {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.settings_label_language),
+                    style = OcType.body,
+                    color = c.ink,
+                    modifier = Modifier.weight(1f),
+                )
+                Row(
+                    Modifier
+                        .background(c.surface2, RoundedCornerShape(12.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    val currentTag by appearance.languageTag.collectAsState(initial = "")
+                    val effectiveTag = when {
+                        currentTag.isNotEmpty() -> currentTag
+                        java.util.Locale.getDefault().language == "zh" -> "zh-CN"
+                        else -> "en"
+                    }
+                    AppearanceRepository.LANGUAGE_OPTIONS.drop(1).forEach { (tag, label) ->
+                        ThemeOption(
+                            label = label,
+                            selected = effectiveTag == tag,
+                            c = c,
+                        ) {
+                            scope.launch {
+                                appearance.setLanguageTag(tag)
+                                // Recreate activity to apply locale change
+                                (context as? Activity)?.recreate()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(Modifier.height(22.dp))
 
         // ── AGENT ──
@@ -1046,9 +1099,22 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         Spacer(Modifier.height(22.dp))
 
         // ── ABOUT ──
-        SectionHeader("ABOUT")
+        SectionHeader(stringResource(R.string.settings_section_about))
         SettingsCard {
-            SettingsRow("Version", "0.6.0")
+            val packageInfo = remember {
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            SettingsRow(stringResource(R.string.settings_label_version), packageInfo.versionName ?: stringResource(R.string.settings_placeholder_empty))
+            Hairline()
+            SettingsRow(stringResource(R.string.settings_label_opencode_version), openCodeVersion ?: stringResource(R.string.settings_placeholder_empty))
+            Hairline()
+            SettingsRow(stringResource(R.string.settings_label_runtime_mode), when (mode) {
+                ConnectionMode.LAN -> stringResource(R.string.setup_mode_lan)
+                ConnectionMode.LOCAL_BUNDLED -> stringResource(R.string.settings_value_bundled)
+                ConnectionMode.LOCAL_EXTERNAL -> stringResource(R.string.settings_value_external)
+            })
+            Hairline()
+            SettingsRow(stringResource(R.string.settings_label_device), "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
         }
 
         Spacer(Modifier.height(28.dp))
@@ -1068,7 +1134,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 .padding(horizontal = 22.dp, vertical = 14.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text("Disconnect", style = OcType.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = Color(0xFFC44D4D))
+            Text(stringResource(R.string.settings_action_disconnect), style = OcType.body.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = Color(0xFFC44D4D))
         }
 
         Spacer(Modifier.height(20.dp))
@@ -1080,7 +1146,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         ) {
             Text("opencode", style = OcType.mono, color = c.ink4)
             Text(" · ", style = OcType.mono, color = c.ink4)
-            Text(activeEndpoint?.displayUrl ?: "loading", style = OcType.mono, color = c.ink4)
+            Text(activeEndpoint?.displayUrl ?: stringResource(R.string.settings_value_loading), style = OcType.mono, color = c.ink4)
         }
     }
 }

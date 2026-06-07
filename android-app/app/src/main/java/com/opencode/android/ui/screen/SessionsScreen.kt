@@ -27,6 +27,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.opencode.android.R
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontFamily
@@ -67,7 +69,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var isCreating by remember { mutableStateOf(false) }
-    var hostPort by remember { mutableStateOf("loading") }
+    var hostPort by remember { mutableStateOf(context.getString(R.string.settings_value_loading)) }
     val endpoint by prefs.activeEndpoint.collectAsState(initial = null)
     var refreshJob by remember { mutableStateOf<Job?>(null) }
 
@@ -103,7 +105,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                 serverPassword = serverPassword,
             )
         }
-        result.onFailure { error = it.message ?: "Local runtime failed to start" }
+        result.onFailure { error = it.message ?: context.getString(R.string.sessions_error_local_failed) }
         return result.isSuccess
     }
 
@@ -180,7 +182,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
         val active = endpoint
         if (active == null) {
             isLoading = true
-            hostPort = "loading"
+            hostPort = context.getString(R.string.settings_value_loading)
         } else {
             refreshNow(active)
         }
@@ -227,7 +229,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                 ) {
                     Icon(
                         Icons.Default.Refresh,
-                        contentDescription = "Refresh",
+                        contentDescription = stringResource(R.string.sessions_action_refresh),
                         modifier = Modifier.size(22.dp).rotate(rotation),
                         tint = c.ink3,
                     )
@@ -239,7 +241,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                 ) {
                     Icon(
                         Icons.Default.Settings,
-                        contentDescription = "Settings",
+                        contentDescription = stringResource(R.string.sessions_action_settings),
                         modifier = Modifier.size(22.dp),
                         tint = c.ink3,
                     )
@@ -256,12 +258,12 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                 Text(hostPort, style = OcType.mono, color = c.ink2)
                 Spacer(Modifier.width(10.dp))
                 if (error == null && !isLoading) {
-                    Text("online", style = OcType.mono, color = c.accent)
+                    Text(stringResource(R.string.sessions_status_online), style = OcType.mono, color = c.accent)
                 }
                 Spacer(Modifier.weight(1f))
                 val count = sessions.size
                 Text(
-                    if (count > 99) "99+ sessions" else "$count sessions",
+                    if (count > 99) stringResource(R.string.sessions_count_overflow) else stringResource(R.string.sessions_count, count),
                     style = OcType.mono, color = c.ink3,
                 )
             }
@@ -284,7 +286,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                         Text("✕", style = OcType.brand, color = c.accent)
                         Spacer(Modifier.height(10.dp))
                         Text(
-                            error ?: "Error",
+                            error ?: stringResource(R.string.sessions_error_label),
                             style = OcType.body,
                             color = c.ink2,
                             textAlign = TextAlign.Center,
@@ -301,7 +303,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                                 .background(c.accent, OcButtonShape)
                                 .padding(horizontal = 24.dp, vertical = 12.dp)
                         ) {
-                            Text("Retry", style = OcType.body.copy(color = c.accentInk))
+                            Text(stringResource(R.string.sessions_action_retry), style = OcType.body.copy(color = c.accentInk))
                         }
                     }
                 }
@@ -357,7 +359,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                                 ) {
                                     Icon(
                                         Icons.Default.Delete,
-                                        contentDescription = "Delete",
+                                        contentDescription = stringResource(R.string.sessions_action_delete),
                                         tint = Color.White,
                                         modifier = Modifier.size(20.dp),
                                     )
@@ -423,7 +425,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                         .padding(horizontal = 20.dp, vertical = 14.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("+ New session", style = OcType.body.copy(color = c.accentInk, fontWeight = FontWeight.SemiBold))
+                    Text(stringResource(R.string.sessions_new_session), style = OcType.body.copy(color = c.accentInk, fontWeight = FontWeight.SemiBold))
                 }
             }
         }
@@ -436,13 +438,13 @@ private fun relativeTime(epochMs: Long): String {
     val now = System.currentTimeMillis()
     val diff = (now - epochMs) / 1000   // 秒
     return when {
-        diff < 60        -> "刚刚"
-        diff < 3600       -> "${diff / 60}分钟前"
-        diff < 86400      -> "${diff / 3600}小时前"
-        diff < 172800     -> "昨天"
-        diff < 604800     -> "${diff / 86400}天前"
+        diff < 60        -> stringResource(R.string.time_just_now)
+        diff < 3600       -> stringResource(R.string.time_minutes_ago, diff / 60)
+        diff < 86400      -> stringResource(R.string.time_hours_ago, diff / 3600)
+        diff < 172800     -> stringResource(R.string.time_yesterday)
+        diff < 604800     -> stringResource(R.string.time_days_ago, diff / 86400)
         else              -> {
-            val sdf = java.text.SimpleDateFormat("M月d日", LocalLocale.current.platformLocale)
+            val sdf = java.text.SimpleDateFormat(stringResource(R.string.time_date_format), LocalLocale.current.platformLocale)
             sdf.format(java.util.Date(epochMs))
         }
     }
@@ -495,7 +497,7 @@ private fun SessionRow(
                 Box(Modifier.size(7.dp).clip(CircleShape).background(c.accent))
                 Spacer(Modifier.width(2.dp))
             }
-            Text("$messageCount msgs", style = OcType.mono.copy(fontSize = 11.5.sp), color = c.ink3)
+            Text(stringResource(R.string.sessions_msg_count, messageCount), style = OcType.mono.copy(fontSize = 11.5.sp), color = c.ink3)
         }
         // Line 3: Preview — last assistant message
         if (!preview.isNullOrBlank()) {
@@ -524,10 +526,15 @@ private fun EmptySessionsState(onNewSession: () -> Unit) {
             BlinkingCursor(color = c.accent)
         }
         Spacer(Modifier.height(16.dp))
-        Text("No conversations yet", style = OcType.body, color = c.ink2)
+        Text(stringResource(R.string.sessions_empty_title), style = OcType.body, color = c.ink2)
         Spacer(Modifier.height(28.dp))
 
-        val suggestions = listOf("Explain this codebase", "Find bugs", "Write a feature", "Refactor code")
+        val suggestions = listOf(
+            stringResource(R.string.sessions_suggestion_explain),
+            stringResource(R.string.sessions_suggestion_bugs),
+            stringResource(R.string.sessions_suggestion_feature),
+            stringResource(R.string.sessions_suggestion_refactor),
+        )
         suggestions.forEach { text ->
             Box(
                 Modifier

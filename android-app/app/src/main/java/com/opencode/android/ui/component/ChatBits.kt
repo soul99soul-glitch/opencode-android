@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.sp
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcType
 import com.opencode.android.ui.theme.SuperellipseShape
+import androidx.compose.ui.res.stringResource
+import com.opencode.android.R
 
 /* =============================================================================
  * Thinking 折叠块 —— 默认收起;点三角旋转 90°,内容淡入上浮,左侧带竖线。
@@ -62,8 +64,8 @@ fun ThinkingBlock(text: String, chars: Int, modifier: Modifier = Modifier) {
                 }
                 drawPath(p, c.ink4)
             }
-            Text("Thinking", style = OcType.monoStrong, color = c.ink3)
-            Text("$chars chars", style = OcType.mono, color = c.ink4)
+            Text(stringResource(R.string.chat_thinking_collapsed), style = OcType.monoStrong, color = c.ink3)
+            Text(stringResource(R.string.chat_chars_count, chars), style = OcType.mono, color = c.ink4)
         }
         AnimatedVisibility(
             visible = open,

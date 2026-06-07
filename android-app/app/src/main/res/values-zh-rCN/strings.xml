@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand -->
+    <string name="app_name">OpenCode</string>
+
+    <!-- ============================================================ -->
+    <!-- Settings Screen -->
+    <!-- ============================================================ -->
+    <string name="settings_title">设置</string>
+    <string name="settings_section_mode">模式</string>
+    <string name="settings_section_server">服务器</string>
+    <string name="settings_section_runtime">Runtime</string>
+    <string name="settings_section_appearance">外观</string>
+    <string name="settings_section_agent">Agent</string>
+    <string name="settings_section_about">关于</string>
+    <string name="settings_section_connection">连接</string>
+    <string name="settings_section_provider">Provider</string>
+    <string name="settings_section_workspace">工作区</string>
+    <string name="settings_section_language">语言</string>
+
+    <string name="settings_label_connection">连接方式</string>
+    <string name="settings_label_host">主机</string>
+    <string name="settings_label_port">端口</string>
+    <string name="settings_label_password">密码</string>
+    <string name="settings_label_runtime">Runtime</string>
+    <string name="settings_label_bundled_port">内置端口</string>
+    <string name="settings_label_external_port">外部端口</string>
+    <string name="settings_label_workspace">工作区</string>
+    <string name="settings_label_directory">目录</string>
+    <string name="settings_label_endpoint">Endpoint</string>
+    <string name="settings_label_runtime_apk">Runtime APK</string>
+    <string name="settings_label_theme">主题</string>
+    <string name="settings_label_accent">主题色</string>
+    <string name="settings_label_language">语言</string>
+    <string name="settings_label_version">版本</string>
+    <string name="settings_label_opencode_version">OpenCode 版本</string>
+    <string name="settings_label_runtime_mode">Runtime 模式</string>
+    <string name="settings_label_device">设备</string>
+    <string name="settings_label_status">状态</string>
+    <string name="settings_label_mode">模式</string>
+
+    <string name="settings_value_bundled">内置</string>
+    <string name="settings_value_external">外部</string>
+    <string name="settings_value_saved">已保存</string>
+    <string name="settings_value_loading">加载中…</string>
+    <string name="settings_value_light">浅色</string>
+    <string name="settings_value_dark">深色</string>
+    <string name="settings_value_on">开</string>
+    <string name="settings_value_off">关</string>
+
+    <string name="settings_action_browse">浏览</string>
+    <string name="settings_action_hide">隐藏</string>
+    <string name="settings_action_app">App</string>
+    <string name="settings_action_clear">清除</string>
+    <string name="settings_action_apply">应用</string>
+    <string name="settings_action_health">Health</string>
+    <string name="settings_action_start">启动</string>
+    <string name="settings_action_stop">停止</string>
+    <string name="settings_action_battery">电池</string>
+    <string name="settings_action_disconnect">断开连接</string>
+
+    <string name="settings_lang_english">English</string>
+    <string name="settings_lang_chinese">简体中文</string>
+
+    <string name="settings_placeholder_empty">—</string>
+    <string name="settings_placeholder_password">••••••••</string>
+    <string name="settings_placeholder_password_hint">选填</string>
+
+    <string name="settings_external_folder_info">外部文件夹 · 包含 .git/.env 等隐藏文件，修改会自动同步</string>
+    <string name="settings_legacy_apk_warning">检测到旧版 companion APK（%s），请卸载以避免端口冲突。</string>
+
+    <!-- Status messages -->
+    <string name="status_saved">已保存</string>
+    <string name="status_saved_runtime_not_ready">已保存，但 Runtime 未就绪</string>
+    <string name="status_runtime_ready">Runtime 已就绪</string>
+    <string name="status_runtime_starting">Runtime 启动中…</string>
+    <string name="status_runtime_restarting">Runtime 重启中…</string>
+    <string name="status_runtime_start_failed">Runtime 启动失败</string>
+    <string name="status_runtime_restart_failed">Runtime 重启失败</string>
+    <string name="status_runtime_stop_requested">已停止 Runtime</string>
+    <string name="status_runtime_stop_failed">Runtime 停止失败</string>
+    <string name="status_battery_prompt_opened">已打开电池设置</string>
+    <string name="status_battery_prompt_failed">打开电池设置失败</string>
+    <string name="status_api_key_cleared">API Key 已清除</string>
+    <string name="status_api_key_cleared_not_ready">API Key 已清除，但 Runtime 未就绪</string>
+    <string name="status_failed_save_provider">保存 Provider 失败</string>
+    <string name="status_failed_save_mcp">保存 MCP / 插件失败</string>
+    <string name="status_sync_failed">同步失败</string>
+    <string name="status_sync_up_to_date">已是最新</string>
+    <string name="status_sync_with_native">已与本地配置同步</string>
+    <string name="status_mcp_names_must_unique">MCP 名称不能重复</string>
+    <string name="status_fetching_models">正在拉取模型…</string>
+    <string name="status_auto_fetching_models">自动拉取模型中…</string>
+    <string name="status_model_selected">模型已选择</string>
+    <string name="status_bundled_port_invalid">内置端口需在 1–65535 之间</string>
+    <string name="status_external_port_invalid">外部端口需在 1–65535 之间</string>
+    <string name="status_failed_load_workspaces">加载工作区失败</string>
+    <string name="status_unavailable">不可用</string>
+    <string name="status_no_configured_providers">暂无已配置的 Provider</string>
+    <string name="status_linked_external_folder">已绑定外部文件夹</string>
+
+    <!-- ============================================================ -->
+    <!-- Setup Screen -->
+    <!-- ============================================================ -->
+    <string name="setup_connect_lan">连接局域网 OpenCode</string>
+    <string name="setup_use_local">使用本地 OpenCode</string>
+    <string name="setup_mode_lan">局域网</string>
+    <string name="setup_mode_local">本地</string>
+    <string name="setup_field_server_url">> 服务器地址</string>
+    <string name="setup_field_port">> 端口</string>
+    <string name="setup_field_password">> 密码</string>
+    <string name="setup_field_directory">> 目录</string>
+    <string name="setup_field_workspace">> 工作区</string>
+    <string name="setup_placeholder_password">选填</string>
+    <string name="setup_placeholder_directory">~/projects/opencode</string>
+    <string name="setup_placeholder_workspace">default</string>
+    <string name="setup_action_load">加载</string>
+    <string name="setup_action_pick">选取</string>
+    <string name="setup_action_browse">浏览</string>
+    <string name="setup_action_connect_lan">连接局域网</string>
+    <string name="setup_action_start_local">启动本地</string>
+    <string name="setup_external_folder_info">已选外部文件夹 · 含隐藏文件，变更会自动同步</string>
+    <string name="setup_local_runtime_info">本地 Runtime · %s</string>
+    <string name="setup_no_lan_needed">无需先连接局域网服务器</string>
+    <string name="setup_error_server_unhealthy">服务器不可用</string>
+    <string name="setup_error_local_failed">本地 Runtime 启动失败</string>
+    <string name="setup_error_connection_failed">连接失败：%s</string>
+    <string name="setup_error_load_workspaces">加载工作区失败</string>
+    <string name="setup_workspace_external">外部：%s</string>
+    <string name="setup_workspace_internal">内置：%s</string>
+
+    <!-- ============================================================ -->
+    <!-- Sessions Screen -->
+    <!-- ============================================================ -->
+    <string name="sessions_status_online">在线</string>
+    <string name="sessions_count">%d 个会话</string>
+    <string name="sessions_count_overflow">99+ 个会话</string>
+    <string name="sessions_msg_count">%d 条消息</string>
+    <string name="sessions_empty_title">暂无对话</string>
+    <string name="sessions_suggestion_explain">解释这个代码库</string>
+    <string name="sessions_suggestion_bugs">找 Bug</string>
+    <string name="sessions_suggestion_feature">写个新功能</string>
+    <string name="sessions_suggestion_refactor">重构代码</string>
+    <string name="sessions_new_session">+ 新会话</string>
+    <string name="sessions_action_refresh">刷新</string>
+    <string name="sessions_action_settings">设置</string>
+    <string name="sessions_action_delete">删除</string>
+    <string name="sessions_action_retry">重试</string>
+    <string name="sessions_error_label">错误</string>
+    <string name="sessions_error_local_failed">本地 Runtime 启动失败</string>
+
+    <!-- Relative time -->
+    <string name="time_just_now">刚刚</string>
+    <string name="time_minutes_ago">%d 分钟前</string>
+    <string name="time_hours_ago">%d 小时前</string>
+    <string name="time_yesterday">昨天</string>
+    <string name="time_days_ago">%d 天前</string>
+    <string name="time_date_format">M月d日</string>
+
+    <!-- ============================================================ -->
+    <!-- Chat Screen -->
+    <!-- ============================================================ -->
+    <string name="chat_new_session">新会话</string>
+    <string name="chat_input_placeholder">向 opencode 提问…</string>
+    <string name="chat_input_prompt_placeholder">向 %s 提问…</string>
+    <string name="chat_panel_subtask">Subtask</string>
+    <string name="chat_panel_commands">Commands</string>
+    <string name="chat_panel_skills">Skills</string>
+    <string name="chat_no_matching_skills">没有匹配的 Skill</string>
+    <string name="chat_loading_agents">加载 Agent 中…</string>
+    <string name="chat_no_response">未收到响应，服务器可能处理失败</string>
+    <string name="chat_unexpected_response">服务器返回异常</string>
+
+    <!-- Command descriptions -->
+    <string name="chat_cmd_review">代码审查</string>
+    <string name="chat_cmd_fix">修 Bug</string>
+    <string name="chat_cmd_find">搜索代码</string>
+    <string name="chat_cmd_explain">解释代码</string>
+    <string name="chat_cmd_plan">制定方案</string>
+
+    <!-- Chat components -->
+    <string name="chat_thinking">思考中…</string>
+    <string name="chat_thinking_collapsed">思考</string>
+    <string name="chat_chars_count">%d 字符</string>
+    <string name="chat_empty_prompt">想构建点什么？</string>
+    <string name="chat_suggest_explain">解释这个代码库</string>
+    <string name="chat_suggest_bugs">找找代码里的 Bug</string>
+    <string name="chat_suggest_feature">写个新功能</string>
+    <string name="chat_connecting">连接中…</string>
+    <string name="chat_running">运行中</string>
+    <string name="chat_done">完成</string>
+
+    <!-- Agent short names — 开发者都认英文缩写，不翻译 -->
+    <string name="agent_short_orch">Orch</string>
+    <string name="agent_short_build">Build</string>
+    <string name="agent_short_plan">Plan</string>
+    <string name="agent_short_design">Design</string>
+    <string name="agent_short_fix">Fix</string>
+    <string name="agent_short_explore">Explore</string>
+    <string name="agent_short_librarian">Lib</string>
+    <string name="agent_short_oracle">Oracle</string>
+    <string name="agent_short_council">Council</string>
+    <string name="agent_short_coder">Coder</string>
+
+    <!-- ============================================================ -->
+    <!-- Settings sub-sections -->
+    <!-- ============================================================ -->
+    <string name="mcp_section_title">MCP 与插件</string>
+    <string name="mcp_add_remote">+ 添加远程 MCP</string>
+    <string name="mcp_plugins_label">插件（npm 包名，每行一个）</string>
+    <string name="mcp_plugins_placeholder">opencode-plugin-foo\n@scope/bar@1.2.3</string>
+    <string name="mcp_default_plugins">默认插件</string>
+    <string name="mcp_refresh_from_agent">从 Agent 同步</string>
+    <string name="mcp_sync_info">与 files/.config/opencode 双向同步 · 仅支持远程 MCP（HTTP/SSE）</string>
+
+    <string name="local_provider_section_title">本地 Provider</string>
+    <string name="local_provider_enable">启用</string>
+    <string name="local_provider_api_base">API Base URL</string>
+    <string name="local_provider_coding_base">Coding Base URL</string>
+    <string name="local_provider_api_key">API Key</string>
+    <string name="local_provider_model">模型</string>
+    <string name="local_provider_fetching">拉取中…</string>
+    <string name="local_provider_choose">选择…</string>
+    <string name="local_provider_loading_models">加载模型中…</string>
+    <string name="local_provider_no_models">暂无模型</string>
+    <string name="local_provider_selected">已选</string>
+    <string name="local_provider_select">选择</string>
+    <string name="local_provider_use">使用</string>
+    <string name="local_provider_default">默认</string>
+    <string name="local_provider_models">模型列表</string>
+    <string name="local_provider_fetching_models">拉取中…</string>
+    <string name="local_provider_retry">重试</string>
+    <string name="local_provider_loading">加载中…</string>
+    <string name="local_provider_select_model">选择…</string>
+
+    <string name="agent_default_agent">默认 Agent</string>
+
+    <string name="workspace_section_title">工作区</string>
+    <string name="workspace_pinned">已固定</string>
+    <string name="workspace_all">全部</string>
+    <string name="workspace_sessions_count">%d 个会话</string>
+    <string name="workspace_current">当前</string>
+    <string name="workspace_open">打开</string>
+
+    <!-- MCP field placeholders -->
+    <string name="mcp_field_name">名称</string>
+    <string name="mcp_field_url_placeholder">https://mcp.example.com/sse</string>
+    <string name="mcp_token_saved">Token：已保存（留空则不修改）</string>
+    <string name="mcp_token_placeholder">Bearer Token（选填）</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_refresh">刷新</string>
+    <string name="cd_settings">设置</string>
+    <string name="cd_delete">删除</string>
+    <string name="cd_attached_image">附件图片</string>
+
+    <!-- Workspace errors -->
+    <string name="error_external_folder_permission_lost">外部文件夹权限已失效，请在设置中重新选择文件夹。</string>
+
+    <!-- Dynamic status messages -->
+    <string name="status_health_version">正常 · %s</string>
+    <string name="status_synced_from_agent">已从 Agent 同步：MCP %s · 插件 %s</string>
+    <string name="status_imported_from_agent">已从 Agent 导入：%s %s</string>
+    <string name="status_fetched_models">已从 %2$s 拉取 %1$d 个模型，请选择</string>
+    <string name="status_model_fetch_failed">模型拉取失败：%s</string>
+    <string name="status_mcp_saved_plugins_from_agent">来自 Agent：%s</string>
+</resources>
