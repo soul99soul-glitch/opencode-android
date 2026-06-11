@@ -1,106 +1,63 @@
 # opencode-android
 
-[中文 README](README.zh-CN.md)
+[中文说明](README.zh-CN.md)
 
-opencode-android is an experimental native Android client for [OpenCode](https://opencode.ai). It explores what it would take to bring a coding-agent workflow, normally tied to a laptop terminal or browser, onto a phone or tablet.
+A native Android client for [OpenCode](https://opencode.ai), built with Jetpack Compose.
 
-The project is not trying to be a generic chatbot. Its focus is the mobile developer experience around OpenCode: connecting to an OpenCode server, streaming coding-agent output, managing sessions and messages, and experimenting with Android-side runtime orchestration through Termux or local binaries.
+The app connects to a running OpenCode server so you can browse sessions, send messages, and follow streamed responses from a phone or tablet. It is a mobile interface for OpenCode, not a general-purpose chat app.
 
-At a glance, the project highlights are:
+> [!IMPORTANT]
+> This project is still early. There is no stable release, and the APK does not include a working OpenCode binary. The simplest setup is to run `opencode serve` on a computer or in Termux, then connect the app to it.
 
-- A native Jetpack Compose client for OpenCode sessions and messages.
-- REST + SSE streaming integration for coding-agent interaction.
-- Early local server/runtime orchestration work for Android, Termux, and packaged binaries.
-- A mobile-first UX experiment for reviewing, delegating, and continuing agent work away from a desktop.
+This is an independent project and is not affiliated with the OpenCode maintainers.
 
-This repository is independent from upstream OpenCode. It is an Android client and integration experiment that speaks to OpenCode's HTTP/SSE API; it is not an official OpenCode app.
+## What works
 
-## Why This Matters
+- Connect to an OpenCode server using a full URL or separate host and port fields
+- Use password-based Basic Auth and set a working directory with `x-opencode-directory`
+- Create, open, and delete sessions
+- Send and fetch messages
+- Receive server events over SSE
+- Show text while a response is streaming, then render the completed message as Markdown
+- Choose agents and models reported by the server
+- Build slash-command suggestions from OpenCode skills
+- Prepare image and file attachments
+- Display tool calls and links to child sessions
+- Save connection, appearance, agent, and model preferences
+- Switch between light and dark themes and choose an accent color
 
-AI coding agents are still mostly desktop tools. opencode-android asks a practical question: can a developer inspect, delegate, and continue coding-agent work from a mobile device without turning the phone into a weak copy of a desktop IDE?
+## What is not ready
 
-That makes the project useful as open-source infrastructure and research material:
+- Shipping an OpenCode runtime inside the APK
+- Starting and managing a local OpenCode server entirely from the app
+- A dependable Termux handoff flow
+- Reliable SSE reconnection across network changes and Android background limits
+- Signed releases and automatic updates
+- Broad automated test coverage
 
-- It gives Android developers a concrete Compose/Kotlin client for a real coding-agent server.
-- It documents the rough edges of REST, SSE streaming, process management, and mobile UX for agent tools.
-- It helps explore non-desktop access to AI development workflows, including Termux and Android-native runtime paths.
-- It is intentionally small enough to study, fork, and improve.
+`OpenCodeService` and `ProcessManager` already try to find an executable in these locations:
 
-The maintainer also explores other Android AI-agent projects, including more personal mobile agent work. opencode-android has a narrower role: a mobile OpenCode client and coding-agent workflow experiment.
+```text
+<nativeLibraryDir>/libopencode.so
+<filesDir>/bin/opencode
+<filesDir>/opencode
+```
 
-## Project Highlights
+That code is experimental. This repository does not contain an OpenCode binary that can be bundled directly into the APK.
 
-- **Native Android client for OpenCode** - Jetpack Compose UI for sessions, messages, setup, settings, agent selection, and model selection.
-- **REST and SSE integration** - Ktor/OkHttp REST calls plus raw `HttpURLConnection` SSE streaming against an OpenCode server.
-- **Streaming coding-agent UI** - incremental assistant output, throttled rendering, message reconciliation, abort support, and markdown rendering after completion.
-- **Session and message state management** - session list, session creation/deletion, message fetch, optimistic local messages, and server sync.
-- **Mobile-first development workflow experiment** - touch-first chat, file/image attachment preparation, slash-command autocomplete from OpenCode skills, and subagent navigation hooks.
-- **Local server/runtime orchestration research** - Android foreground service and process manager code for launching an `opencode serve` process when a compatible binary is available.
-- **Termux and Android runtime bridge** - the `build/` tree contains packaging and research work around `opencode-termux`, Android/Bionic constraints, glibc-wrapped OpenCode binaries, and package generation.
-- **Open-source Android + AI tooling value** - a reproducible place to study how coding-agent clients behave outside the usual desktop environment.
+## Build from source
 
-## Current Status and Scope
-
-This is an early development project. The app is useful for experimentation, but it should not be presented as a polished or stable public release.
-
-Implemented in the Android app today:
-
-- Configure an OpenCode server by host/URL, port, optional password, and directory.
-- Check `/global/health` before entering the app.
-- List, create, open, enrich, and delete OpenCode sessions.
-- Fetch and send OpenCode messages.
-- Stream server events from `/event` with session filtering.
-- Render assistant output while streaming, then render final markdown messages.
-- Fetch available agents, skills, and configured providers/models.
-- Select a default agent and model.
-- Prepare image/file attachments as prompt parts.
-- Show tool-call-oriented message parts and subagent navigation affordances.
-- Persist connection, appearance, agent, and model preferences with DataStore.
-- Provide light/dark theme and accent settings.
-
-Still experimental or in progress:
-
-- Bundling a working OpenCode binary inside the APK.
-- Starting and supervising a local OpenCode runtime entirely from the app.
-- Production-quality Termux integration and handoff flows.
-- Hardening SSE reconnect behavior across network changes and Android background limits.
-- Release packaging, signing, update distribution, and end-user onboarding.
-- Comprehensive automated tests.
-
-The `OpenCodeService` and `ProcessManager` code currently look for an executable in these locations:
-
-- `context.applicationInfo.nativeLibraryDir/libopencode.so`
-- `context.filesDir/bin/opencode`
-- `context.filesDir/opencode`
-
-Those paths are part of the local-runtime experiment. The repository currently does not include a prebuilt APK-ready OpenCode binary under `android-app/app/src/main/jniLibs`, so the most reliable path is to run OpenCode separately and connect the app to it.
-
-## Relationship to OpenCode, Termux, and opencode-termux
-
-OpenCode is the coding agent server/runtime. opencode-android is a client that talks to it.
-
-Typical development setup:
-
-1. Run `opencode serve` on a development machine, in Termux, or in another reachable environment.
-2. Point the Android app at that server.
-3. Use the app as a mobile session/message UI for the coding agent.
-
-Termux matters because it is one of the most realistic ways to run developer tooling directly on Android today. The `build/` directory contains related packaging and runtime research, including references to [Hope2333/opencode-termux](https://github.com/Hope2333/opencode-termux). That work is complementary to the Android app: it helps answer how OpenCode can run on Android-like environments, while the app explores how a mobile client should feel.
-
-## Build From Source
-
-Requirements:
-
-- Android Studio with Android Gradle Plugin support for this project.
-- JDK 17.
-- Android SDK 36.
-- An OpenCode server to connect to for runtime testing.
-
-Build the debug APK:
+You need JDK 17, Android SDK 36, and an Android Studio version that supports the Android Gradle Plugin used by the project.
 
 ```bash
 cd android-app
 ./gradlew assembleDebug
+```
+
+The APK is written to:
+
+```text
+android-app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Install it on a connected device or emulator:
@@ -109,115 +66,82 @@ Install it on a connected device or emulator:
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Useful verification command:
+## Connect to an OpenCode server
 
-```bash
-./gradlew :app:assembleDebug
-```
+### Run the server on your computer
 
-## Run With an OpenCode Server
-
-### Option A: Server on your development machine
-
-Start OpenCode so it listens on the network:
+Start OpenCode on an address reachable from your Android device:
 
 ```bash
 OPENCODE_SERVER_PASSWORD="" opencode serve --hostname 0.0.0.0 --port 4096
 ```
 
-Then enter the machine's LAN IP and port `4096` in the app.
+Enter the computer's local network address and port `4096` in the app.
 
-If you prefer not to expose the port on the LAN, use USB reverse port forwarding:
+For a device connected over USB, ADB reverse port forwarding avoids exposing the server to the local network:
 
 ```bash
 adb reverse tcp:4096 tcp:4096
 OPENCODE_SERVER_PASSWORD="" opencode serve --hostname 127.0.0.1 --port 4096
 ```
 
-Then use `127.0.0.1` and port `4096` in the app.
+The app can then connect to `127.0.0.1:4096`.
 
-### Option B: Server in Termux
+### Run the server in Termux
 
-Install or build an OpenCode runtime for Termux, then run:
+Install or build an OpenCode runtime that works in Termux, then start the server:
 
 ```bash
 opencode serve --hostname 127.0.0.1 --port 4096
 ```
 
-The Android app can connect to `127.0.0.1:4096` when the server is reachable from the same Android environment. Depending on how OpenCode is installed and isolated, you may need to adjust host, port, or Android networking setup.
+The app can usually connect to `127.0.0.1:4096`. You may need a different address if OpenCode runs inside another compatibility or isolation layer.
 
-The Termux packaging research in this repository lives under `build/`; see [build/README.md](build/README.md) and [build/docs/native-android-research.md](build/docs/native-android-research.md) for the runtime side.
+The `build/` directory contains the repository's Termux and Android runtime packaging work. See [build/README.md](build/README.md) and [build/docs/native-android-research.md](build/docs/native-android-research.md). Part of that work references [Hope2333/opencode-termux](https://github.com/Hope2333/opencode-termux).
 
-### Passwords and directories
-
-The app supports:
-
-- Optional Basic auth using the configured OpenCode password.
-- `x-opencode-directory` for selecting the working directory.
-- Full server URLs such as `http://192.168.1.10:4096`, or separate host/port fields.
-
-## Repository Layout
+## Repository layout
 
 ```text
 opencode-android/
-├── README.md
-├── android-app/
-│   ├── settings.gradle.kts
-│   ├── build.gradle.kts
-│   └── app/
-│       ├── build.gradle.kts
-│       └── src/main/
-│           ├── AndroidManifest.xml
-│           ├── java/com/opencode/android/
-│           │   ├── data/api/OpenCodeApi.kt
-│           │   ├── data/model/Models.kt
-│           │   ├── data/repository/
-│           │   ├── service/OpenCodeService.kt
-│           │   ├── service/ProcessManager.kt
-│           │   └── ui/
-│           └── res/
-└── build/
-    ├── README.md
-    ├── docs/
-    ├── scripts/
-    ├── patches/
-    └── packaging/
+├── android-app/    # Android client
+│   └── app/src/
+│       ├── main/   # Compose UI, API client, data, and service code
+│       └── test/   # Unit tests
+└── build/          # Termux and Android runtime packaging experiments
 ```
 
-## Tech Stack
+The Android source lives under `android-app/app/src/main/java/com/opencode/android/`:
+
+- `data/api/OpenCodeApi.kt`: OpenCode HTTP API and SSE client
+- `data/model/Models.kt`: API data models
+- `data/repository/`: DataStore-backed preferences
+- `ui/`: Compose screens and components
+- `service/`: experimental local runtime launcher
+
+## Stack
 
 | Area | Technology |
 | --- | --- |
 | Language | Kotlin |
 | UI | Jetpack Compose, Material 3 |
-| Navigation | Compose Navigation |
-| Networking | Ktor Client, OkHttp, raw `HttpURLConnection` for SSE |
+| Navigation | Navigation Compose |
+| Networking | Ktor Client, OkHttp, `HttpURLConnection` |
 | Serialization | kotlinx.serialization |
-| Persistence | AndroidX DataStore Preferences |
-| Markdown | `multiplatform-markdown-renderer-m3` |
-| Service experiment | Android foreground service + `ProcessBuilder` |
-| Minimum SDK | 26 |
-| Target/compile SDK | 36 |
+| Preferences | AndroidX DataStore |
+| Markdown | multiplatform-markdown-renderer |
+| Minimum Android version | API 26 |
+| Compile and target version | API 36 |
 
 ## Contributing
 
-Contributions are welcome, especially around:
-
-- OpenCode API compatibility.
-- SSE streaming reliability.
-- Android process/runtime integration.
-- Termux handoff and documentation.
-- Mobile UX for coding-agent sessions.
-- Tests and small reproducible examples.
-
-Please keep changes honest about project maturity. A good contribution should make the mobile OpenCode workflow more understandable, more reliable, or easier to reproduce.
+The main gaps are OpenCode API compatibility, SSE reliability, the local runtime, Termux setup, and tests. When reporting a bug or sending a change, include the OpenCode version you tested and the steps needed to reproduce the behavior.
 
 ## License
 
-MIT. See [build/LICENSE](build/LICENSE).
+[MIT](build/LICENSE)
 
 ## Credits
 
-- [OpenCode](https://opencode.ai) for the coding-agent runtime this app connects to.
-- [Hope2333/opencode-termux](https://github.com/Hope2333/opencode-termux) for Android/Termux runtime packaging reference work.
-- [multiplatform-markdown-renderer](https://github.com/mikepenz/multiplatform-markdown-renderer) for Compose markdown rendering.
+- [OpenCode](https://opencode.ai)
+- [Hope2333/opencode-termux](https://github.com/Hope2333/opencode-termux)
+- [multiplatform-markdown-renderer](https://github.com/mikepenz/multiplatform-markdown-renderer)

@@ -41,6 +41,7 @@ data class ChatDisplayPart(
     val tool: String? = null,
     val callID: String? = null,
     val state: ToolState? = null,
+    val isFinalText: Boolean = false,
     /** Original index in the server message `parts` list — drives render order. */
     val sourceOrder: Int = Int.MAX_VALUE,
 )
@@ -228,7 +229,7 @@ class ChatStateHolder(
             val msg = messages[idx]
             if (msg.deferredParts.isNotEmpty()) {
                 messages[idx] = msg.copy(
-                    visibleParts = (msg.visibleParts + msg.deferredParts).sortedBy { it.sourceOrder },
+                    visibleParts = orderAssistantPartsForDisplay(msg.visibleParts + msg.deferredParts),
                     deferredParts = emptyList(),
                 )
             }
@@ -265,13 +266,13 @@ class ChatStateHolder(
         val localAssistantId = activeLocalAssistantId ?: return false
         consumedServerMessageIds += serverAssistant.info.id
         updateMessage(localAssistantId) { msg ->
-            val allParts = serverAssistant.parts.toDisplayParts(includeEmptyText = false)
+            val allParts = serverAssistant.parts.toAssistantDisplayParts()
             val deferredParts = allParts.filter { it.type in DEFERRED_PART_TYPES }
             val immediateParts = allParts.filter { it.type !in DEFERRED_PART_TYPES }
-            val visibleParts = if (serverAssistant.combinedText().isBlank() && msg.phase == MessagePhase.Streaming) {
-                mergePartsByRenderId(msg.visibleParts, immediateParts).sortedBy { it.sourceOrder }
+            val visibleParts = if (immediateParts.any { it.type == "text" }) {
+                immediateParts
             } else {
-                immediateParts.sortedBy { it.sourceOrder }
+                mergePartsByRenderId(msg.visibleParts, immediateParts)
             }
 
             msg.copy(
@@ -281,8 +282,8 @@ class ChatStateHolder(
                 providerID = serverAssistant.info.providerID ?: msg.providerID,
                 modelID = serverAssistant.info.modelID ?: msg.modelID,
                 phase = MessagePhase.Settling,
-                visibleParts = visibleParts,
-                deferredParts = mergePartsByRenderId(msg.deferredParts, deferredParts).sortedBy { it.sourceOrder },
+                visibleParts = orderAssistantPartsForDisplay(visibleParts),
+                deferredParts = deferredParts,
             )
         }
         return true
@@ -330,8 +331,35 @@ class ChatStateHolder(
             providerID = info.providerID,
             modelID = info.modelID,
             phase = phase,
-            visibleParts = parts.toDisplayParts(includeEmptyText = false),
+            visibleParts = if (info.role == "assistant") {
+                orderAssistantPartsForDisplay(parts.toAssistantDisplayParts())
+            } else {
+                parts.toDisplayParts(includeEmptyText = false)
+            },
         )
+    }
+
+    private fun orderAssistantPartsForDisplay(parts: List<ChatDisplayPart>): List<ChatDisplayPart> {
+        val ordered = parts.sortedBy { it.sourceOrder }
+        val finalText = ordered.lastOrNull { it.isFinalText } ?: return ordered
+        return ordered.filterNot { it.renderId == finalText.renderId } + finalText
+    }
+
+    private fun List<MessagePart>.toAssistantDisplayParts(): List<ChatDisplayPart> {
+        val displayParts = toDisplayParts(includeEmptyText = false)
+        val finalTextIndex = displayParts.indexOfLast { it.type == "text" }
+        if (finalTextIndex < 0) return displayParts
+        val textCount = displayParts.count { it.type == "text" }
+        return displayParts.mapIndexed { index, part ->
+            if (index == finalTextIndex) {
+                part.copy(
+                    renderId = if (textCount == 1) TEXT_PART_RENDER_ID else FINAL_TEXT_RENDER_ID,
+                    isFinalText = true,
+                )
+            } else {
+                part
+            }
+        }
     }
 
     private fun List<ChatDisplayPart>.withStableText(text: String): List<ChatDisplayPart> {
@@ -399,12 +427,6 @@ class ChatStateHolder(
         }
     }
 
-    private fun Message.combinedText(): String {
-        return parts
-            .filter { it.type == "text" && !it.text.isNullOrBlank() }
-            .joinToString("\n\n") { it.text.orEmpty() }
-    }
-
     private fun Message.firstText(): String? = parts.firstOrNull { it.type == "text" }?.text
 
     private fun mergePartsByRenderId(
@@ -436,6 +458,7 @@ class ChatStateHolder(
 
     private companion object {
         const val TEXT_PART_RENDER_ID = "text:0"
+        const val FINAL_TEXT_RENDER_ID = "final-text"
         val VISIBLE_PART_TYPES = setOf("text", "reasoning", "file", "image", "tool", "tool-invocation", "tool-result")
         val DEFERRED_PART_TYPES = setOf("tool", "tool-invocation", "tool-result", "step-start", "step-finish")
     }

@@ -182,6 +182,96 @@ class ChatStateHolderTest {
     }
 
     @Test
+    fun coldLoadedAssistantFinalTextRendersAfterThinkingAndToolParts() {
+        val holder = ChatStateHolder("s1")
+
+        holder.loadServerMessages(
+            listOf(
+                Message(
+                    info = MessageInfo(id = "a1", role = "assistant"),
+                    parts = listOf(
+                        MessagePart(type = "text", text = "final answer"),
+                        MessagePart(type = "reasoning", text = "thinking"),
+                        MessagePart(type = "tool", tool = "bash", callID = "c1"),
+                        MessagePart(type = "reasoning", text = "more thinking"),
+                    ),
+                )
+            )
+        )
+
+        val parts = holder.messages.single().visibleParts
+        assertEquals(listOf("reasoning", "tool", "reasoning", "text"), parts.map { it.type })
+        assertEquals("final answer", parts.last().text)
+    }
+
+    @Test
+    fun streamingAssistantFinalTextStaysAfterReleasedToolParts() {
+        val holder = holderWithStreamingText("final answer")
+
+        holder.onServerMessages(
+            listOf(
+                Message(
+                    info = MessageInfo(id = "a1", role = "assistant"),
+                    parts = listOf(
+                        MessagePart(type = "text", text = "final answer"),
+                        MessagePart(type = "reasoning", text = "thinking"),
+                        MessagePart(type = "tool", tool = "bash", callID = "c1"),
+                        MessagePart(type = "reasoning", text = "more thinking"),
+                    ),
+                )
+            )
+        )
+
+        holder.releaseDeferredParts()
+
+        val parts = holder.messages.single { it.role == "assistant" }.visibleParts
+        assertEquals(listOf("reasoning", "tool", "reasoning", "text"), parts.map { it.type })
+        assertEquals("final answer", parts.last().text)
+    }
+
+    @Test
+    fun intermediateTextKeepsPositionWhileFinalTextRendersLast() {
+        val holder = ChatStateHolder("s1")
+
+        holder.loadServerMessages(
+            listOf(
+                Message(
+                    info = MessageInfo(id = "a1", role = "assistant"),
+                    parts = listOf(
+                        MessagePart(type = "text", text = "before tool"),
+                        MessagePart(type = "tool", tool = "bash", callID = "c1"),
+                        MessagePart(type = "text", text = "final answer"),
+                    ),
+                )
+            )
+        )
+
+        val parts = holder.messages.single().visibleParts
+        assertEquals(listOf("text", "tool", "text"), parts.map { it.type })
+        assertEquals("before tool", parts.first().text)
+        assertEquals("final answer", parts.last().text)
+        assertEquals("final-text", parts.last().renderId)
+    }
+
+    @Test
+    fun reasoningSnapshotWithoutTextKeepsStreamingSlotAndReasoning() {
+        val holder = holderWithStreamingText("partial answer")
+
+        holder.onServerMessages(
+            listOf(
+                Message(
+                    info = MessageInfo(id = "a1", role = "assistant"),
+                    parts = listOf(MessagePart(type = "reasoning", text = "still thinking")),
+                )
+            )
+        )
+
+        val parts = holder.messages.single { it.role == "assistant" }.visibleParts
+        assertEquals(listOf("reasoning", "text"), parts.map { it.type })
+        assertEquals("partial answer", parts.last().text)
+    }
+
+    @Test
     fun abortRemovesEmptyAssistantSlot() {
         val holder = ChatStateHolder("s1")
         holder.onLocalSend(
