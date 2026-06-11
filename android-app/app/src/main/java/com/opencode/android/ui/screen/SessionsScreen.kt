@@ -58,6 +58,11 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     var error by remember { mutableStateOf<String?>(null) }
     var isCreating by remember { mutableStateOf(false) }
     var hostPort by remember { mutableStateOf("127.0.0.1:4096") }
+    val config by prefs.config.collectAsState(initial = com.opencode.android.data.model.ServerConfig())
+    val workspaceProfiles by prefs.workspaceProfiles.collectAsState(initial = emptyList())
+    val activeWorkspaceId by prefs.activeWorkspaceId.collectAsState(initial = config.endpointIdentity())
+    val activeWorkspace = workspaceProfiles.firstOrNull { it.id == activeWorkspaceId }
+    var showWorkspaceSwitcher by remember { mutableStateOf(false) }
 
     suspend fun createNewSession() {
         if (isCreating) return
@@ -77,25 +82,34 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     fun refresh() {
         scope.launch {
             isLoading = true
-            val cfg = prefs.config.first()
+            val cfg = config
+            val endpointIdentity = cfg.endpointIdentity()
             hostPort = if (cfg.host.startsWith("http://") || cfg.host.startsWith("https://"))
                 cfg.host.trimEnd('/') else "${cfg.host}:${cfg.port}"
             val api = OpenCodeApi(cfg)
-            api.listSessions()
-                .onSuccess { list ->
+            val sessionsResult = api.listSessions()
+            if (prefs.config.first().endpointIdentity() == endpointIdentity) {
+                sessionsResult.onSuccess { list ->
                     // Filter out subagent worker sessions (not parent tasks)
                     val subagentPattern = """(.*\(@\w+ subagent\).*)|(^Subtask worker .*$)""".toRegex()
-                    sessions = list.filter { !subagentPattern.matches(it.title) }
+                    val visibleSessions = list.filter { !subagentPattern.matches(it.title) }
+                    sessions = visibleSessions
                     error = null
-                    sessionPreviews = api.enrichSessions(sessions)
+                    val previews = api.enrichSessions(visibleSessions)
+                    if (prefs.config.first().endpointIdentity() == endpointIdentity) {
+                        sessionPreviews = previews
+                    }
                 }
-                .onFailure { error = it.message }
+                    .onFailure { error = it.message }
+            }
             api.close()
-            isLoading = false
+            if (prefs.config.first().endpointIdentity() == endpointIdentity) {
+                isLoading = false
+            }
         }
     }
 
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(config.endpointIdentity()) { refresh() }
 
     Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
@@ -143,17 +157,74 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
             ) {
                 OnlineDot(active = error == null && !isLoading)
                 Spacer(Modifier.width(8.dp))
-                Text(hostPort, style = OcType.mono, color = c.ink2)
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .pressable { showWorkspaceSwitcher = !showWorkspaceSwitcher }
+                ) {
+                    Text(hostPort, style = OcType.mono, color = c.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val workspaceLabel = activeWorkspace?.name
+                        ?: config.directory.substringAfterLast('/').ifBlank { config.directory.ifBlank { "default workspace" } }
+                    Text(
+                        "$workspaceLabel ${if (showWorkspaceSwitcher) "▲" else "▼"}",
+                        style = OcType.mono.copy(fontSize = 11.sp),
+                        color = c.ink3,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Spacer(Modifier.width(10.dp))
                 if (error == null && !isLoading) {
                     Text("online", style = OcType.mono, color = c.accent)
                 }
-                Spacer(Modifier.weight(1f))
                 val count = sessions.size
                 Text(
                     if (count > 99) "99+ sessions" else "$count sessions",
                     style = OcType.mono, color = c.ink3,
                 )
+            }
+
+            if (showWorkspaceSwitcher) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp, vertical = 6.dp)
+                        .background(c.surface2, RoundedCornerShape(14.dp))
+                        .padding(vertical = 4.dp)
+                ) {
+                    workspaceProfiles.take(6).forEach { profile ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .pressable {
+                                    showWorkspaceSwitcher = false
+                                    scope.launch { prefs.activateWorkspace(profile.id) }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    profile.name,
+                                    style = OcType.body,
+                                    color = if (profile.id == activeWorkspaceId) c.accent else c.ink,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    profile.config.directory.ifBlank { profile.config.host },
+                                    style = OcType.mono.copy(fontSize = 11.sp),
+                                    color = c.ink3,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (profile.id == activeWorkspaceId) {
+                                Text("active", style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
+                            }
+                        }
+                    }
+                }
             }
 
             Hairline()

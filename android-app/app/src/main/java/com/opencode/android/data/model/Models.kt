@@ -9,7 +9,51 @@ data class ServerConfig(
     val port: Int = 4096,
     val password: String = "",
     val directory: String = ""
+) {
+    fun normalizedHost(): String = host.trim().trimEnd('/')
+
+    fun normalizedDirectory(): String = directory.trim()
+
+    fun endpointBaseUrl(): String {
+        val normalizedHost = normalizedHost()
+        return if (normalizedHost.startsWith("http://") || normalizedHost.startsWith("https://")) {
+            normalizedHost
+        } else {
+            "http://$normalizedHost:$port"
+        }
+    }
+
+    fun endpointIdentity(): String {
+        return "${endpointBaseUrl()}|${normalizedDirectory()}"
+    }
+}
+
+@Serializable
+data class WorkspaceProfile(
+    val id: String,
+    val name: String,
+    val config: ServerConfig,
+    val pinned: Boolean = false,
+    val lastUsedAt: Long = 0,
 )
+
+fun ServerConfig.toWorkspaceProfile(
+    name: String? = null,
+    pinned: Boolean = true,
+    lastUsedAt: Long = System.currentTimeMillis(),
+): WorkspaceProfile {
+    val label = name
+        ?: normalizedDirectory().substringAfterLast('/').ifBlank {
+            normalizedHost().ifBlank { "Workspace" }
+        }
+    return WorkspaceProfile(
+        id = endpointIdentity(),
+        name = label,
+        config = this,
+        pinned = pinned,
+        lastUsedAt = lastUsedAt,
+    )
+}
 
 @Serializable
 data class HealthResponse(
@@ -155,3 +199,13 @@ data class SkillInfo(
     val name: String,
     val description: String = "",
 )
+
+data class RuntimeDiagnostics(
+    val agents: List<String> = emptyList(),
+    val mcps: List<String> = emptyList(),
+    val tools: List<String> = emptyList(),
+    val plugins: List<String> = emptyList(),
+    val error: String? = null,
+) {
+    val hasRuntimeConfig: Boolean = error == null
+}

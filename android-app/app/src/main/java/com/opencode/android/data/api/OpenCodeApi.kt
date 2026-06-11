@@ -14,6 +14,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -29,19 +30,14 @@ class OpenCodeApi(config: ServerConfig) {
         encodeDefaults = true
     }
 
-    private val baseUrl = when {
-        config.host.startsWith("http://") || config.host.startsWith("https://") ->
-            config.host.trimEnd('/')  // Full URL — use as-is
-        else ->
-            "http://${config.host}:${config.port}"  // Legacy host:port — auto HTTP
-    }
+    private val baseUrl = config.endpointBaseUrl()
 
     private val authHeader = if (config.password.isNotBlank()) {
         val cred = Base64.getEncoder().encodeToString("opencode:${config.password}".toByteArray())
         "Basic $cred"
     } else null
 
-    private val directoryHeader = config.directory.takeIf { it.isNotBlank() }
+    private val directoryHeader = config.normalizedDirectory().takeIf { it.isNotBlank() }
 
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(json) }
@@ -100,6 +96,15 @@ class OpenCodeApi(config: ServerConfig) {
     suspend fun fetchSkills(): Result<List<SkillInfo>> = safeRequest {
         client.get("$baseUrl/skill")
     }
+
+    suspend fun fetchConfigDiagnostics(): Result<RuntimeDiagnostics> = runCatching {
+        val response = client.get("$baseUrl/config")
+        if (response.status.value !in 200..299) {
+            val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
+            throw Exception("HTTP ${response.status.value}: $body")
+        }
+        json.parseToJsonElement(response.bodyAsText()).jsonObject.toRuntimeDiagnostics()
+    }.recoverCatching { RuntimeDiagnostics(error = it.message ?: "Unable to read /config") }
 
     suspend fun deleteSession(sessionId: String): Result<HttpResponse> = runCatching {
         client.delete("$baseUrl/session/$sessionId")

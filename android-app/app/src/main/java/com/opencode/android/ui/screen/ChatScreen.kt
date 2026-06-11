@@ -114,6 +114,8 @@ private fun shortAgent(agent: String?): String = when (agent) {
     else          -> agent.take(5)
 }
 
+private const val STREAM_TEXT_FALLBACK_KEY = "stream:text"
+
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @Composable
 fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onSubagentNavigate: (sessionId: String) -> Unit = {}) {
@@ -130,8 +132,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var isSending by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val rawText = inputText.text
-    val sseBuffer = remember(sessionId) { StringBuilder() }
-    val flushedSseText = remember(sessionId) { StringBuilder() }
+    val sseBuffers = remember(sessionId) { mutableStateMapOf<String, StringBuilder>() }
+    val flushedSseText = remember(sessionId) { mutableStateMapOf<String, String>() }
     val reversedMessages by remember { derivedStateOf { messages.asReversed() } }
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
@@ -147,6 +149,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var expandedProviderId by remember { mutableStateOf<String?>(null) }
     var selectedModel by remember { mutableStateOf<ModelRef?>(null) }
     val listState = rememberLazyListState()
+    val entryEndpointIdentity = remember(sessionId) { mutableStateOf<String?>(null) }
 
     // Parse @agent or /command prefix from input
     val parsedInput = remember(rawText) {
@@ -192,26 +195,51 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     val parsedRest = parsedInput?.second?.ifBlank { null }
 
     fun resetStreamBuffers() {
-        sseBuffer.clear()
+        sseBuffers.clear()
         flushedSseText.clear()
     }
 
-    fun markSseTextFlushed(text: String) {
-        flushedSseText.clear()
-        flushedSseText.append(text)
+    fun activeSseText(): String {
+        return sseBuffers[STREAM_TEXT_FALLBACK_KEY]?.toString()
+            ?: sseBuffers.values.lastOrNull()?.toString()
+            ?: ""
+    }
+
+    fun hasSseText(): Boolean = sseBuffers.values.any { it.isNotEmpty() }
+
+    fun appendSseDelta(messageId: String?, partId: String?, delta: String) {
+        if (delta.isBlank()) return
+        val key = listOfNotNull(messageId?.takeIf { it.isNotBlank() }, partId?.takeIf { it.isNotBlank() })
+            .joinToString(":")
+            .ifBlank { STREAM_TEXT_FALLBACK_KEY }
+        val buffer = sseBuffers.getOrPut(key) { StringBuilder() }
+        buffer.append(delta)
+    }
+
+    fun markSseTextFlushed(key: String, text: String) {
+        flushedSseText[key] = text
     }
 
     fun Message.firstText(): String? = parts.firstOrNull { it.type == "text" }?.text
 
-    suspend fun syncServerMessagesAfterIdle() {
+    suspend fun isCurrentEndpoint(expectedIdentity: String): Boolean {
+        return prefs.config.first().endpointIdentity() == expectedIdentity
+    }
+
+    suspend fun syncServerMessagesAfterIdle(config: ServerConfig) {
+        val endpointIdentity = config.endpointIdentity()
         delay(800)
-        val cfg = prefs.config.first()
-        val api = OpenCodeApi(cfg)
-        api.getMessages(sessionId).onSuccess { serverMsgs ->
-            chatState.onServerMessages(serverMsgs).selectedModel?.let { selectedModel = it }
+        if (!isCurrentEndpoint(endpointIdentity)) return
+        val api = OpenCodeApi(config)
+        val messagesResult = api.getMessages(sessionId)
+        if (isCurrentEndpoint(endpointIdentity)) {
+            messagesResult.onSuccess { serverMsgs ->
+                chatState.onServerMessages(serverMsgs).selectedModel?.let { selectedModel = it }
+            }
         }
         api.close()
         delay(32)
+        if (!isCurrentEndpoint(endpointIdentity)) return
         chatState.releaseDeferredParts()
         chatState.finishSettling()
         resetStreamBuffers()
@@ -221,10 +249,12 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     LaunchedEffect(sessionId) {
         while (true) {
             delay(100)
-            val buf = sseBuffer.toString()
-            if (buf.isNotEmpty() && buf != flushedSseText.toString()) {
-                markSseTextFlushed(buf)
-                chatState.onStreamDeltaFlush(buf)
+            val next = sseBuffers.entries.lastOrNull { it.value.isNotEmpty() } ?: continue
+            val key = next.key
+            val text = next.value.toString()
+            if (text.isNotEmpty() && text != flushedSseText[key]) {
+                markSseTextFlushed(key, text)
+                chatState.onStreamDeltaFlush(text)
                 if (listState.firstVisibleItemIndex == 0 && listState.layoutInfo.totalItemsCount > 0) {
                     listState.scrollToItem(0)
                 }
@@ -269,12 +299,31 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         }
     }
 
+    LaunchedEffect(sessionId) {
+        entryEndpointIdentity.value = prefs.config.first().endpointIdentity()
+    }
+
+    LaunchedEffect(sessionId) {
+        prefs.config.collect { currentConfig ->
+            val entryIdentity = entryEndpointIdentity.value ?: return@collect
+            if (currentConfig.endpointIdentity() != entryIdentity) {
+                isSending = false
+                resetStreamBuffers()
+                chatState.onAbort()
+                onBack()
+            }
+        }
+    }
+
     // Load messages + providers + agents + initial model
     LaunchedEffect(sessionId) {
         val config = prefs.config.first()
+        val endpointIdentity = config.endpointIdentity()
         val api = OpenCodeApi(config)
-        api.getMessages(sessionId)
-            .onSuccess { msgs ->
+        val messagesResult = api.getMessages(sessionId)
+        if (isCurrentEndpoint(endpointIdentity)) {
+            messagesResult
+                .onSuccess { msgs ->
                 chatState.loadServerMessages(msgs.takeLast(50))
                 // Extract model from last assistant message (syncs with desktop/other clients)
                 msgs.lastOrNull { it.info.role == "assistant" }?.info?.let { info ->
@@ -283,12 +332,15 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                     }
                 }
             }
-            .onFailure { errorMsg = it.message }
+                .onFailure { errorMsg = it.message }
+        }
         // Fetch configured providers
-        api.fetchConfiguredProviders()
-            .onSuccess { providers = it }
+        val providersResult = api.fetchConfiguredProviders()
+        if (isCurrentEndpoint(endpointIdentity)) {
+            providersResult.onSuccess { providers = it }
+        }
         // If no model from history, use defaults from settings
-        if (selectedModel == null) {
+        if (isCurrentEndpoint(endpointIdentity) && selectedModel == null) {
             val defProvider = prefs.defaultModelProvider.first()
             val defModel = prefs.defaultModelId.first()
             if (defProvider.isNotBlank() && defModel.isNotBlank()) {
@@ -296,15 +348,19 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             }
         }
         // Fetch available agents (primary, non-hidden only)
-        api.fetchAgents()
-            .onSuccess { allAgents ->
+        val agentsResult = api.fetchAgents()
+        if (isCurrentEndpoint(endpointIdentity)) {
+            agentsResult.onSuccess { allAgents ->
                 availableAgents = allAgents.filter { it.mode == "primary" && !it.hidden }
                 allKnownAgents = allAgents.filter { !it.hidden && it.mode != "primary" }
             }
+        }
         // Fetch skills for / command autocomplete
-        api.fetchSkills()
-            .onSuccess { skills = it }
-        isLoading = false
+        val skillsResult = api.fetchSkills()
+        if (isCurrentEndpoint(endpointIdentity)) {
+            skillsResult.onSuccess { skills = it }
+        }
+        if (isCurrentEndpoint(endpointIdentity)) isLoading = false
         api.close()
     }
 
@@ -321,9 +377,18 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     // SSE events
     LaunchedEffect(sessionId) {
         prefs.config.flatMapLatest { config ->
-            OpenCodeApi(config).sessionEvents()
-        }.collect { eventData ->
+            flow {
+                val api = OpenCodeApi(config)
+                try {
+                    api.sessionEvents().collect { eventData -> emit(config to eventData) }
+                } finally {
+                    api.close()
+                }
+            }
+        }.collect { (eventConfig, eventData) ->
             try {
+                val eventEndpointIdentity = eventConfig.endpointIdentity()
+                if (!isCurrentEndpoint(eventEndpointIdentity)) return@collect
                 val obj = json.parseToJsonElement(eventData).jsonObject
                 val type = obj["type"]?.jsonPrimitive?.content ?: ""
                 val props = obj["properties"]?.jsonObject
@@ -332,17 +397,23 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 if (evtSid.isBlank() || evtSid != sessionId) return@collect
                 when (type) {
                     "message.part.delta" -> {
-                        sseBuffer.append(props?.get("delta")?.jsonPrimitive?.content ?: "")
+                        appendSseDelta(
+                            messageId = props?.get("messageID")?.jsonPrimitive?.content
+                                ?: props?.get("messageId")?.jsonPrimitive?.content,
+                            partId = props?.get("partID")?.jsonPrimitive?.content
+                                ?: props?.get("partId")?.jsonPrimitive?.content,
+                            delta = props?.get("delta")?.jsonPrimitive?.content ?: "",
+                        )
                     }
                     "session.status" -> {
                         val status = props?.get("status")?.jsonObject?.get("type")?.jsonPrimitive?.content
                         if (status == "idle" || status == "completed") {
                             isSending = false
-                            if (sseBuffer.isNotEmpty()) {
-                                chatState.onStreamDeltaFlush(sseBuffer.toString())
+                            if (hasSseText()) {
+                                chatState.onStreamDeltaFlush(activeSseText())
                             }
                             chatState.onCompleted()
-                            scope.launch { syncServerMessagesAfterIdle() }
+                            scope.launch { syncServerMessagesAfterIdle(eventConfig) }
                         }
                     }
                 }
@@ -361,8 +432,13 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             if (!isSending) break
             try {
                 val cfg = prefs.config.first()
+                val endpointIdentity = cfg.endpointIdentity()
                 val api = OpenCodeApi(cfg)
                 val result = api.getMessages(sessionId)
+                if (!isCurrentEndpoint(endpointIdentity)) {
+                    api.close()
+                    break
+                }
                 result.onSuccess { serverMsgs ->
                     val latestAssistant = serverMsgs.lastOrNull { it.info.role == "assistant" }
                     val sig = serverMsgs.joinToString("|") { it.info.id } + "_" +
@@ -373,7 +449,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                         lastChangeAt = System.currentTimeMillis()
                         if (flushedSseText.isEmpty()) {
                             latestAssistant?.firstText()?.takeIf { it.isNotBlank() }?.let { text ->
-                                markSseTextFlushed(text)
+                                markSseTextFlushed(STREAM_TEXT_FALLBACK_KEY, text)
                                 chatState.onStreamDeltaFlush(text)
                             }
                         }
@@ -383,9 +459,10 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             } catch (_: Exception) {}
             // No change for 20s while sending → assume server is idle
             if (System.currentTimeMillis() - lastChangeAt > 20_000 && isSending) {
+                val cfg = prefs.config.first()
                 isSending = false
                 chatState.onCompleted()
-                scope.launch { syncServerMessagesAfterIdle() }
+                scope.launch { syncServerMessagesAfterIdle(cfg) }
             }
         }
     }
@@ -608,7 +685,9 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                         } else {
                                             // Lazy lookup: find subtask session by known patterns
                                             scope.launch {
-                                                val api = OpenCodeApi(prefs.config.first())
+                                                val cfg = prefs.config.first()
+                                                val endpointIdentity = cfg.endpointIdentity()
+                                                val api = OpenCodeApi(cfg)
                                                 val sessions = api.listSessions().getOrNull() ?: emptyList()
                                                 // Pattern 1: "Subtask worker from $sessionId" (old format)
                                                 // Pattern 2: title containing "(@agent subagent)" (new format)
@@ -619,6 +698,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                                     )
                                                 }?.id
                                                 api.close()
+                                                if (!isCurrentEndpoint(endpointIdentity)) return@launch
                                                 if (found != null) {
                                                     subtaskWorkerSid = found
                                                     onSubagentNavigate(found)
@@ -1007,9 +1087,11 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 if (isSending) {
                                     scope.launch {
                                         val cfg = prefs.config.first()
+                                        val endpointIdentity = cfg.endpointIdentity()
                                         val api = OpenCodeApi(cfg)
                                         api.abort(sessionId)
                                         api.close()
+                                        if (!isCurrentEndpoint(endpointIdentity)) return@launch
                                         isSending = false
                                         resetStreamBuffers()
                                         chatState.onAbort()
@@ -1083,9 +1165,11 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 )
                                 scope.launch {
                                     val cfg = prefs.config.first()
+                                    val endpointIdentity = cfg.endpointIdentity()
                                     val api = OpenCodeApi(cfg)
-                                    api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
-                                        .onSuccess { msg ->
+                                    val sendResult = api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
+                                    if (isCurrentEndpoint(endpointIdentity)) {
+                                        sendResult.onSuccess { msg ->
                                             // Update selected model from response
                                             msg.info.let { info ->
                                                 if (info.providerID != null && info.modelID != null) {
@@ -1094,14 +1178,17 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                             }
                                             // Refresh title if still placeholder
                                             if (displayTitle == "新会话") {
-                                                api.getSession(sessionId).onSuccess { s ->
-                                                    val t = s.title.substringBefore(" - ").ifBlank { s.slug }
-                                                    if (t.isNotBlank() && t != "new session") displayTitle = t
+                                                val sessionResult = api.getSession(sessionId)
+                                                if (isCurrentEndpoint(endpointIdentity)) {
+                                                    sessionResult.onSuccess { s ->
+                                                        val t = s.title.substringBefore(" - ").ifBlank { s.slug }
+                                                        if (t.isNotBlank() && t != "new session") displayTitle = t
+                                                    }
                                                 }
                                             }
                                         }
-                                        .onFailure {
-                                            if (sseBuffer.isEmpty() && chatState.onSendFailure()) {
+                                            .onFailure {
+                                            if (!hasSseText() && chatState.onSendFailure()) {
                                                 val msg = it.message ?: "Unknown error"
                                                 errorMsg = if (msg.contains("No suitable converter") || msg.contains("SerializationException"))
                                                     "Unexpected server response"
@@ -1110,6 +1197,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                                 resetStreamBuffers()
                                             }
                                         }
+                                    }
                                     api.close()
                                 }
                             },

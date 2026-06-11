@@ -28,6 +28,8 @@ import com.opencode.android.data.api.OpenCodeApi
 import com.opencode.android.data.model.AgentInfo
 import com.opencode.android.data.model.ModelRef
 import com.opencode.android.data.model.Provider
+import com.opencode.android.data.model.RuntimeDiagnostics
+import com.opencode.android.data.model.toWorkspaceProfile
 import com.opencode.android.data.repository.AppearanceRepository
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.ui.component.Hairline
@@ -58,6 +60,8 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     val config by prefs.config.collectAsState(
         initial = com.opencode.android.data.model.ServerConfig()
     )
+    val workspaceProfiles by prefs.workspaceProfiles.collectAsState(initial = emptyList())
+    val activeWorkspaceId by prefs.activeWorkspaceId.collectAsState(initial = config.endpointIdentity())
     val darkTheme by appearance.darkTheme.collectAsState(initial = false)
     val accentIndex by appearance.accentIndex.collectAsState(initial = 0)
     val scope = rememberCoroutineScope()
@@ -70,15 +74,20 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
     var showModelPicker by remember { mutableStateOf(false) }
     var expandedProviderId by remember { mutableStateOf<String?>(null) }
+    var diagnostics by remember { mutableStateOf(RuntimeDiagnostics()) }
 
     // Load providers + agents from API
-    LaunchedEffect(Unit) {
+    LaunchedEffect(config.endpointIdentity()) {
+        providers = emptyList()
+        availableAgents = emptyList()
         val cfg = prefs.config.first()
         val api = OpenCodeApi(cfg)
         api.fetchConfiguredProviders()
             .onSuccess { providers = it }
         api.fetchAgents()
             .onSuccess { all -> availableAgents = all.filter { it.mode == "primary" && !it.hidden } }
+        api.fetchConfigDiagnostics()
+            .onSuccess { diagnostics = it }
         api.close()
     }
 
@@ -118,6 +127,98 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             SettingsRow("Password", if (config.password.isBlank()) "—" else "••••••••")
             Hairline()
             SettingsRow("Directory", config.directory.ifBlank { "—" })
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        SettingsCard {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Workspaces", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+                Text(
+                    "${workspaceProfiles.size}",
+                    style = OcType.mono.copy(fontSize = 12.sp),
+                    color = c.ink3,
+                )
+            }
+            val visibleProfiles = workspaceProfiles.take(6)
+            visibleProfiles.forEach { profile ->
+                Hairline()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .pressable {
+                            scope.launch { prefs.activateWorkspace(profile.id) }
+                        }
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            profile.name,
+                            style = OcType.body,
+                            color = if (profile.id == activeWorkspaceId) c.accent else c.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            profile.config.directory.ifBlank { profile.config.host },
+                            style = OcType.mono.copy(fontSize = 11.sp),
+                            color = c.ink3,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (profile.id == activeWorkspaceId) {
+                        Text("active", style = OcType.mono.copy(fontSize = 11.sp), color = c.accent)
+                    } else {
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "remove",
+                            style = OcType.mono.copy(fontSize = 11.sp),
+                            color = c.ink4,
+                            modifier = Modifier.pressable {
+                                scope.launch { prefs.removeWorkspaceProfile(profile.id) }
+                            },
+                        )
+                    }
+                }
+            }
+            if (workspaceProfiles.none { it.id == config.endpointIdentity() }) {
+                Hairline()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .pressable {
+                            scope.launch { prefs.saveWorkspaceProfile(config.toWorkspaceProfile(), makeActive = true) }
+                        }
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Pin current workspace", style = OcType.body, color = c.ink, modifier = Modifier.weight(1f))
+                    Text("+", style = OcType.mono.copy(fontSize = 14.sp), color = c.accent)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(22.dp))
+
+        // ── RUNTIME ──
+        SectionHeader("RUNTIME")
+        SettingsCard {
+            SettingsRow("Config", if (diagnostics.hasRuntimeConfig) "available" else diagnostics.error ?: "unavailable")
+            Hairline()
+            SettingsRow("Agents", diagnostics.agents.size.toString())
+            Hairline()
+            SettingsRow("MCP", diagnostics.mcps.take(3).joinToString().ifBlank { "0" })
+            Hairline()
+            SettingsRow("Tools", diagnostics.tools.size.toString())
+            Hairline()
+            SettingsRow("Plugins", diagnostics.plugins.take(2).joinToString().ifBlank { "0" })
         }
 
         Spacer(Modifier.height(22.dp))
