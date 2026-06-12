@@ -1,8 +1,11 @@
 package com.opencode.android.ui.screen
 
 import android.annotation.SuppressLint
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -54,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.OpenCodeApi
 import com.opencode.android.data.api.WorkspaceOption
 import com.opencode.android.data.api.fetchWorkspaceOptions
+import com.opencode.android.data.api.filterUserFacingSessions
 import com.opencode.android.data.model.ActiveEndpoint
 import com.opencode.android.data.model.ConnectionMode
 import com.opencode.android.data.model.LanProfile
@@ -187,9 +191,7 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
             listResult
                 .onSuccess { list ->
                     if (endpoint?.identityKey != refreshKey) return@onSuccess
-                    // Filter out subagent worker sessions (not parent tasks)
-                    val subagentPattern = """(.*\(@\w+ subagent\).*)|(^Subtask worker .*$)""".toRegex()
-                    sessions = list.filter { !subagentPattern.matches(it.title) }
+                    sessions = list.filterUserFacingSessions()
                     error = null
                     val currentSessions = sessions
                     val previews = api.enrichSessions(currentSessions)
@@ -302,24 +304,71 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
-        val drawerWidth = (maxWidth * 0.82f).coerceAtMost(330.dp)
+        val drawerWidth = (maxWidth * 0.74f).coerceAtMost(280.dp)
         val drawerWidthPx = with(LocalDensity.current) { drawerWidth.toPx() }
         val targetOffsetPx = if (drawerOpen) drawerWidthPx else 0f
         val isDraggingDrawer = !drawerDragOffsetPx.isNaN()
-        val settledOffsetPx = if (isDraggingDrawer) drawerDragOffsetPx else targetOffsetPx
-        val settledOffsetDp = with(LocalDensity.current) { settledOffsetPx.toDp() }
-        val animatedSessionOffset by animateDpAsState(
-            targetValue = settledOffsetDp,
-            animationSpec = tween(240),
-            label = "workspace-drawer",
+        val drawerOffset = remember { Animatable(0f) }
+        val drawerSpring = spring<Float>(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow,
         )
-        val animatedSessionOffsetPx = with(LocalDensity.current) { animatedSessionOffset.toPx() }
-        val revealProgress = if (drawerWidthPx == 0f) 0f else (settledOffsetPx / drawerWidthPx).coerceIn(0f, 1f)
+        LaunchedEffect(drawerOpen, drawerWidthPx) {
+            if (drawerDragOffsetPx.isNaN()) {
+                drawerOffset.animateTo(targetOffsetPx, drawerSpring)
+            }
+        }
+
+        fun startDrawerDrag() {
+            drawerDragOffsetPx = (if (drawerDragOffsetPx.isNaN()) drawerOffset.value else drawerDragOffsetPx)
+                .coerceIn(0f, drawerWidthPx)
+        }
+
+        fun updateDrawerDrag(dragAmount: Float) {
+            val current = if (drawerDragOffsetPx.isNaN()) drawerOffset.value else drawerDragOffsetPx
+            if (drawerOpen || current > 0f || dragAmount > 0f) {
+                drawerDragOffsetPx = (current + dragAmount).coerceIn(0f, drawerWidthPx)
+            }
+        }
+
+        fun settleDrawerDrag() {
+            val releaseOffset = (if (drawerDragOffsetPx.isNaN()) drawerOffset.value else drawerDragOffsetPx)
+                .coerceIn(0f, drawerWidthPx)
+            val shouldOpen = if (drawerOpen) {
+                releaseOffset > drawerWidthPx * 0.78f
+            } else {
+                releaseOffset > drawerWidthPx * 0.22f
+            }
+            val destination = if (shouldOpen) drawerWidthPx else 0f
+            scope.launch {
+                drawerOffset.snapTo(releaseOffset)
+                drawerDragOffsetPx = Float.NaN
+                drawerOpen = shouldOpen
+                drawerOffset.animateTo(destination, drawerSpring)
+            }
+        }
+
+        val visibleDrawerOffsetPx = if (isDraggingDrawer) drawerDragOffsetPx else drawerOffset.value
+        val revealProgress = if (drawerWidthPx == 0f) 0f else (visibleDrawerOffsetPx / drawerWidthPx).coerceIn(0f, 1f)
 
         WorkspaceRail(
             modifier = Modifier
                 .width(drawerWidth)
                 .fillMaxHeight()
+                .offset {
+                    IntOffset(
+                        x = (visibleDrawerOffsetPx - drawerWidthPx).roundToInt(),
+                        y = 0,
+                    )
+                }
+                .pointerInput(drawerOpen, drawerWidthPx) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { startDrawerDrag() },
+                        onDragEnd = { settleDrawerDrag() },
+                        onDragCancel = { settleDrawerDrag() },
+                        onHorizontalDrag = { _, dragAmount -> updateDrawerDrag(dragAmount) },
+                    )
+                }
                 .statusBarsPadding(),
             endpoint = endpoint,
             sessions = sessions,
@@ -344,24 +393,17 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                 .fillMaxSize()
                 .offset {
                     IntOffset(
-                        x = (if (isDraggingDrawer) settledOffsetPx else animatedSessionOffsetPx).roundToInt(),
+                        x = visibleDrawerOffsetPx.roundToInt(),
                         y = 0,
                     )
                 }
                 .background(c.bg)
                 .pointerInput(drawerOpen, drawerWidthPx) {
                     detectHorizontalDragGestures(
-                        onDragEnd = {
-                            drawerOpen = drawerDragOffsetPx > drawerWidthPx * 0.42f
-                            drawerDragOffsetPx = Float.NaN
-                        },
-                        onDragCancel = { drawerDragOffsetPx = Float.NaN },
-                        onHorizontalDrag = { _, dragAmount ->
-                            val current = if (!drawerDragOffsetPx.isNaN()) drawerDragOffsetPx else targetOffsetPx
-                            if (current > 0f || dragAmount > 0f) {
-                                drawerDragOffsetPx = (current + dragAmount).coerceIn(0f, drawerWidthPx)
-                            }
-                        },
+                        onDragStart = { startDrawerDrag() },
+                        onDragEnd = { settleDrawerDrag() },
+                        onDragCancel = { settleDrawerDrag() },
+                        onHorizontalDrag = { _, dragAmount -> updateDrawerDrag(dragAmount) },
                     )
                 }
                 .statusBarsPadding(),
@@ -531,27 +573,33 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                                         .fillMaxWidth()
                                         .offset(x = animatedOffset)
                                         .background(c.bg)
-                                        .pointerInput(session.id, deleteWidthPx) {
-                                            awaitEachGesture {
-                                                val down = awaitFirstDown(requireUnconsumed = false)
-                                                var pastSlop = 0f
-                                                val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
-                                                    if (over < 0f || swipeOffset < 0f) {
-                                                        pastSlop = over
-                                                        change.consume()
+                                        .then(
+                                            if (drawerOpen) {
+                                                Modifier
+                                            } else {
+                                                Modifier.pointerInput(session.id, deleteWidthPx) {
+                                                    awaitEachGesture {
+                                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                                        var pastSlop = 0f
+                                                        val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                                                            if (over < 0f || swipeOffset < 0f) {
+                                                                pastSlop = over
+                                                                change.consume()
+                                                            }
+                                                        }
+                                                        if (drag != null && (pastSlop < 0f || swipeOffset < 0f)) {
+                                                            swipeOffset = (swipeOffset + pastSlop).coerceIn(-deleteWidthPx, 0f)
+                                                            horizontalDrag(drag.id) { change ->
+                                                                val dragAmount = change.positionChange().x
+                                                                swipeOffset = (swipeOffset + dragAmount).coerceIn(-deleteWidthPx, 0f)
+                                                                change.consume()
+                                                            }
+                                                            swipeOffset = if (swipeOffset < -deleteWidthPx * 0.5f) -deleteWidthPx else 0f
+                                                        }
                                                     }
-                                                }
-                                                if (drag != null && (pastSlop < 0f || swipeOffset < 0f)) {
-                                                    swipeOffset = (swipeOffset + pastSlop).coerceIn(-deleteWidthPx, 0f)
-                                                    horizontalDrag(drag.id) { change ->
-                                                        val dragAmount = change.positionChange().x
-                                                        swipeOffset = (swipeOffset + dragAmount).coerceIn(-deleteWidthPx, 0f)
-                                                        change.consume()
-                                                    }
-                                                    swipeOffset = if (swipeOffset < -deleteWidthPx * 0.5f) -deleteWidthPx else 0f
                                                 }
                                             }
-                                        }
+                                        )
                                 ) {
                                     SessionRow(
                                         session,
@@ -651,17 +699,17 @@ private fun WorkspaceRail(
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 22.dp, vertical = 28.dp),
+                .padding(horizontal = 16.dp, vertical = 18.dp),
         ) {
             Text(
                 stringResource(R.string.sessions_workspace_kicker),
-                style = OcType.mono.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                style = OcType.mono.copy(fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold),
                 color = c.ink3,
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(5.dp))
             Text(
                 stringResource(R.string.sessions_workspace_title),
-                style = OcType.brand.copy(fontSize = 28.sp),
+                style = OcType.brand.copy(fontSize = 21.sp),
                 color = c.ink,
             )
         }
@@ -732,33 +780,33 @@ private fun WorkspaceRail(
         Box(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 22.dp, vertical = 18.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
                 .pressable {
                     if (isLan) onRefresh() else onNewWorkspace()
                 }
-                .background(Color.Transparent, RoundedCornerShape(14.dp))
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .background(Color.Transparent, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 Icon(
                     imageVector = if (isLan) Icons.Default.Refresh else Icons.Default.Add,
                     contentDescription = null,
                     tint = c.ink3,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(16.dp),
                 )
                 Text(
                     if (isLan) stringResource(R.string.sessions_workspace_refresh) else stringResource(R.string.sessions_workspace_new),
-                    style = OcType.body.copy(fontWeight = FontWeight.SemiBold),
+                    style = OcType.body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
                     color = c.ink3,
                 )
             }
         }
         Text(
             stringResource(R.string.sessions_workspace_total, totalSessions),
-            style = OcType.mono.copy(fontSize = 11.sp),
+            style = OcType.mono.copy(fontSize = 10.sp),
             color = c.ink4,
-            modifier = Modifier.padding(start = 22.dp, end = 22.dp, bottom = 10.dp),
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 9.dp),
         )
     }
 }
@@ -781,28 +829,28 @@ private fun WorkspaceRailRow(
         Modifier
             .fillMaxWidth()
             .pressable(onLongClick = onLongClick, onClick = onClick)
-            .padding(horizontal = 22.dp, vertical = 18.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier
-                .size(52.dp)
-                .background(if (selected) c.accent else c.surface2, RoundedCornerShape(14.dp)),
+                .size(38.dp)
+                .background(if (selected) c.accent else c.surface2, RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center,
         ) {
             val tint = if (selected) c.accentInk else c.ink3
             when (icon) {
-                WorkspaceIcon.Code -> Text("</>", style = OcType.monoStrong.copy(fontSize = 16.sp), color = tint)
-                WorkspaceIcon.Folder -> Icon(Icons.Default.Folder, contentDescription = null, tint = tint, modifier = Modifier.size(25.dp))
-                WorkspaceIcon.Person -> Icon(Icons.Default.Person, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-                WorkspaceIcon.Bolt -> Icon(Icons.Default.Bolt, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                WorkspaceIcon.Code -> Text("</>", style = OcType.monoStrong.copy(fontSize = 12.sp), color = tint)
+                WorkspaceIcon.Folder -> Icon(Icons.Default.Folder, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+                WorkspaceIcon.Person -> Icon(Icons.Default.Person, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+                WorkspaceIcon.Bolt -> Icon(Icons.Default.Bolt, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
             }
         }
-        Spacer(Modifier.width(18.dp))
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 title,
-                style = OcType.rowTitle.copy(fontSize = 21.sp),
+                style = OcType.rowTitle.copy(fontSize = 15.sp),
                 color = when {
                     selected -> c.ink
                     dim -> c.ink3
@@ -811,10 +859,10 @@ private fun WorkspaceRailRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(3.dp))
             Text(
                 subtitle,
-                style = OcType.body.copy(fontSize = 15.sp),
+                style = OcType.body.copy(fontSize = 11.5.sp),
                 color = c.ink3,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

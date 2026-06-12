@@ -59,11 +59,8 @@ fun MessageBubble(
     val hasVisiblePartContent = message.visibleParts.any { part ->
         partHasVisibleContent(part.type, part.text)
     }
-    val hasDeferredPartContent = !isUser && message.deferredParts.any { part ->
-        partHasVisibleContent(part.type, part.text)
-    }
     val hasActiveStreamingSlot = !isUser && message.phase == MessagePhase.Streaming
-    if (!hasVisiblePartContent && !hasDeferredPartContent && !hasActiveStreamingSlot) return
+    if (!hasVisiblePartContent && !hasActiveStreamingSlot) return
 
     Column(
         Modifier.fillMaxWidth(),
@@ -209,6 +206,7 @@ fun MessageBubble(
                                     text = text,
                                     chars = text.length,
                                     defaultExpanded = isActivelyGenerating,
+                                    stateKey = "${message.renderId}:${part.renderId}",
                                 )
                             }
                         }
@@ -222,12 +220,6 @@ fun MessageBubble(
                         color = c.ink4,
                     )
                     Spacer(Modifier.height(6.dp))
-                }
-                if (isActivelyGenerating) {
-                    message.deferredParts
-                        .filter { it.renderId !in renderedPartIds }
-                        .filter { it.type == "tool" || it.type == "tool-invocation" || it.type == "tool-result" }
-                        .forEach { part -> AssistantToolPart(part, onSubagentClick) }
                 }
             }
         }

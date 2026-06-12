@@ -185,4 +185,48 @@ class ChatScreenModelSelectionTest {
         assertEquals("assistant", props.eventMessageRole())
         assertEquals("a1", props.eventMessageId())
     }
+
+    @Test
+    fun messagePartSnapshotFallsBackWhenToolStateShapeIsUnknown() {
+        val props = Json.parseToJsonElement(
+            """
+            {
+              "sessionID": "ses_1",
+              "messageID": "a1",
+              "part": {
+                "id": "tool_1",
+                "type": "tool",
+                "messageID": "a1",
+                "tool": "bash",
+                "callID": "c1",
+                "state": { "status": "completed", "output": { "nested": true } }
+              }
+            }
+            """.trimIndent(),
+        ).jsonObject
+
+        val part = props.messagePartSnapshot(Json { ignoreUnknownKeys = true })
+
+        assertEquals("tool", part?.type)
+        assertEquals("tool_1", part?.id)
+        assertEquals("a1", part?.messageID)
+        assertEquals("bash", part?.tool)
+        assertEquals("c1", part?.callID)
+    }
+
+    @Test
+    fun removedPartEventIdsAreParsedFromProperties() {
+        val props = Json.parseToJsonElement(
+            """
+            {
+              "sessionID": "ses_1",
+              "messageID": "a1",
+              "partID": "p1"
+            }
+            """.trimIndent(),
+        ).jsonObject
+
+        assertEquals("a1", props.eventMessageId())
+        assertEquals("p1", props.eventPartId())
+    }
 }

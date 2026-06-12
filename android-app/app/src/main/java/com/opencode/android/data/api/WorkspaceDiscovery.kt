@@ -1,5 +1,6 @@
 package com.opencode.android.data.api
 
+import com.opencode.android.data.model.Session
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -12,14 +13,14 @@ data class WorkspaceOption(
 
 suspend fun OpenCodeApi.fetchWorkspaceOptions(): Result<List<WorkspaceOption>> = runCatching {
     coroutineScope {
-        val rootSessions = listSessions(roots = true).getOrNull().orEmpty()
+        val rootSessions = listSessions(roots = true).getOrNull().orEmpty().filterUserFacingSessions()
         val sessionOptions = rootSessions
             .mapNotNull { session ->
                 session.directory?.takeIf { it.isNotBlank() }?.let { directory ->
                     WorkspaceOption(
                         label = directory.pathLabel(),
                         path = directory,
-                        sessionCount = session.messageCount ?: 0,
+                        sessionCount = 1,
                     )
                 }
             }
@@ -52,6 +53,7 @@ suspend fun OpenCodeApi.fetchWorkspaceOptions(): Result<List<WorkspaceOption>> =
 
         val baseOptions = (sessionOptions + projectOptions)
             .distinctBy { it.path }
+            .filterNot { it.isTransientWorkspaceOption() }
 
         baseOptions
             .map { option ->
@@ -59,8 +61,9 @@ suspend fun OpenCodeApi.fetchWorkspaceOptions(): Result<List<WorkspaceOption>> =
                     val sessionCount = listSessions(directory = option.path)
                         .getOrNull()
                         .orEmpty()
+                        .filterUserFacingSessions()
                         .size
-                    option.copy(sessionCount = maxOf(option.sessionCount, sessionCount))
+                    option.copy(sessionCount = sessionCount.takeIf { it > 0 } ?: option.sessionCount)
                 }
             }
             .awaitAll()
@@ -98,3 +101,25 @@ private fun List<WorkspaceOption>.hideEmptyParentsWithSessionChildren(): List<Wo
 
 private fun String.pathLabel(): String =
     trimEnd('/').substringAfterLast('/').ifBlank { this }
+
+private fun WorkspaceOption.isTransientWorkspaceOption(): Boolean =
+    path.pathLabel().isTransientWorkspaceLabel()
+
+internal fun String.isTransientWorkspaceLabel(): Boolean {
+    val label = trim()
+    val normalized = label.lowercase()
+    return normalized.startsWith("od-conn-test-") || uuidLabelRegex.matches(normalized)
+}
+
+private val uuidLabelRegex = Regex(
+    "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
+internal fun Session.isUserFacingSession(): Boolean {
+    val normalizedTitle = title.trim()
+    return !normalizedTitle.startsWith("Subtask worker ") &&
+        !(normalizedTitle.contains("(@") && normalizedTitle.contains("subagent)"))
+}
+
+internal fun List<Session>.filterUserFacingSessions(): List<Session> =
+    filter { it.isUserFacingSession() }

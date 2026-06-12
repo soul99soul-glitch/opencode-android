@@ -18,6 +18,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Log
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,6 +86,7 @@ import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.runtime.RuntimeCompanionClient
 import com.opencode.android.ui.component.*
 import com.opencode.android.ui.screen.chat.ChatStateHolder
+import com.opencode.android.ui.screen.chat.ChatTimelineEvent
 import com.opencode.android.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
@@ -95,6 +97,7 @@ import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import androidx.compose.ui.res.stringResource
@@ -190,6 +193,17 @@ internal fun JsonObject.eventMessageId(): String? =
         ?: objectField("message")?.stringField("id")
         ?: objectField("message")?.objectField("info")?.stringField("id")
 
+internal fun JsonObject.eventPartId(): String? =
+    stringField("partID")
+        ?: stringField("partId")
+        ?: stringField("part_id")
+        ?: objectField("part")?.stringField("id")
+
+internal fun JsonObject.deltaField(): String? =
+    stringField("field")
+        ?: stringField("partField")
+        ?: deltaPartType()?.let { if (it == "reasoning") "text" else it }
+
 internal fun JsonObject.deltaPartType(): String? {
     val part = objectField("part")
     val partType = part?.stringField("type")
@@ -215,6 +229,42 @@ internal data class StreamPartSnapshot(
     val text: String,
     val messageId: String? = null,
 )
+
+internal fun JsonObject.messageInfoSnapshot(): MessageInfo? {
+    val info = objectField("info") ?: objectField("message")?.objectField("info") ?: return null
+    val id = info.stringField("id") ?: return null
+    return MessageInfo(
+        id = id,
+        role = info.stringField("role") ?: stringField("role") ?: "unknown",
+        sessionID = info.stringField("sessionID") ?: info.stringField("sessionId") ?: eventSessionId(),
+        providerID = info.stringField("providerID") ?: info.stringField("providerId"),
+        modelID = info.stringField("modelID") ?: info.stringField("modelId"),
+        agent = info.stringField("agent"),
+    )
+}
+
+internal fun JsonObject.messagePartSnapshot(json: Json): MessagePart? {
+    val partObj = objectField("part") ?: return null
+    val decoded = runCatching { json.decodeFromJsonElement(MessagePart.serializer(), partObj) }.getOrNull()
+    val fallback = MessagePart(
+        type = partObj.stringField("type") ?: return null,
+        text = partObj.stringField("text"),
+        mime = partObj.stringField("mime"),
+        url = partObj.stringField("url"),
+        filename = partObj.stringField("filename"),
+        id = partObj.stringField("id"),
+        sessionID = partObj.stringField("sessionID") ?: partObj.stringField("sessionId"),
+        messageID = partObj.stringField("messageID") ?: partObj.stringField("messageId") ?: partObj.stringField("message_id"),
+        tool = partObj.stringField("tool"),
+        callID = partObj.stringField("callID") ?: partObj.stringField("callId") ?: partObj.stringField("call_id"),
+        state = decoded?.state,
+    )
+    val part = decoded ?: fallback
+    return part.copy(
+        sessionID = part.sessionID ?: eventSessionId(),
+        messageID = part.messageID ?: eventMessageId(),
+    )
+}
 
 internal fun JsonObject.streamPartSnapshot(): StreamPartSnapshot? {
     val part = objectField("part") ?: this
@@ -292,10 +342,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var isSending by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val rawText = inputText.text
-    val sseBuffer = remember(sessionId) { StringBuilder() }
-    val reasoningSseBuffer = remember(sessionId) { StringBuilder() }
-    val flushedSseText = remember(sessionId) { StringBuilder() }
-    val flushedReasoningSseText = remember(sessionId) { StringBuilder() }
+    var latestStreamText by remember(sessionId) { mutableStateOf("") }
+    var latestReasoningText by remember(sessionId) { mutableStateOf("") }
     val reversedMessages by remember { derivedStateOf { messages.asReversed() } }
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
@@ -330,7 +378,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     val agentActivityStatus by remember {
         derivedStateOf {
             val latestAssistant = messages.lastOrNull { it.role == "assistant" }
-            val parts = latestAssistant?.let { it.visibleParts + it.deferredParts }.orEmpty()
+            val parts = latestAssistant?.visibleParts.orEmpty()
             val hasAssistantOutput = latestAssistant?.visibleParts?.any { part ->
                 when (part.type) {
                     "text", "reasoning" -> !part.text.isNullOrBlank()
@@ -353,8 +401,8 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val hasText = parts.any { it.type == "text" && !it.text.isNullOrBlank() }
                 when {
                     hasRunningTool -> AgentActivityStatus.Tool
-                    hasText || flushedSseText.isNotBlank() -> AgentActivityStatus.Generating
-                    hasReasoning || flushedReasoningSseText.isNotBlank() -> AgentActivityStatus.Thinking
+                    hasText || latestStreamText.isNotBlank() -> AgentActivityStatus.Generating
+                    hasReasoning || latestReasoningText.isNotBlank() -> AgentActivityStatus.Thinking
                     else -> AgentActivityStatus.Thinking
                 }
             }
@@ -405,21 +453,17 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     val parsedRest = parsedInput?.second?.ifBlank { null }
 
     fun resetStreamBuffers() {
-        sseBuffer.clear()
-        reasoningSseBuffer.clear()
-        flushedSseText.clear()
-        flushedReasoningSseText.clear()
+        latestStreamText = ""
+        latestReasoningText = ""
     }
 
     fun markSseTextFlushed(text: String) {
-        flushedSseText.clear()
-        flushedSseText.append(text)
+        latestStreamText = text
         markAgentActivity()
     }
 
     fun markSseReasoningFlushed(text: String) {
-        flushedReasoningSseText.clear()
-        flushedReasoningSseText.append(text)
+        latestReasoningText = text
         markAgentActivity()
     }
 
@@ -502,7 +546,6 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             runCatching { prefs.syncMcpAndPluginsFromNative() }
         }
         delay(32)
-        chatState.releaseDeferredParts()
         chatState.finishSettling()
         resetStreamBuffers()
     }
@@ -518,25 +561,10 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         }
     }
 
-    // Throttled SSE delta flush — updates the stable assistant text part, not a separate bubble.
-    LaunchedEffect(sessionId) {
-        while (true) {
-            delay(100)
-            val buf = sseBuffer.toString()
-            if (buf.isNotEmpty() && buf != flushedSseText.toString()) {
-                markSseTextFlushed(buf)
-                chatState.onStreamDeltaFlush(buf)
-                if (listState.firstVisibleItemIndex == 0 && listState.layoutInfo.totalItemsCount > 0) {
-                    listState.scrollToItem(0)
-                }
-            }
-            val reasoningBuf = reasoningSseBuffer.toString()
-            if (reasoningBuf.isNotEmpty() && reasoningBuf != flushedReasoningSseText.toString()) {
-                markSseReasoningFlushed(reasoningBuf)
-                chatState.onReasoningDeltaFlush(reasoningBuf)
-                if (listState.firstVisibleItemIndex == 0 && listState.layoutInfo.totalItemsCount > 0) {
-                    listState.scrollToItem(0)
-                }
+    fun scrollNewestIntoViewIfPinned() {
+        scope.launch {
+            if (listState.firstVisibleItemIndex == 0 && listState.layoutInfo.totalItemsCount > 0) {
+                listState.scrollToItem(0)
             }
         }
     }
@@ -667,53 +695,70 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val evtSid = props?.eventSessionId().orEmpty()
                 if (evtSid.isBlank() || evtSid != sessionId) return@collect
                 when (type) {
+                    "message.updated" -> {
+                        markAgentActivity()
+                        props?.messageInfoSnapshot()?.let { info ->
+                            chatState.onTimelineEvent(ChatTimelineEvent.MessageUpdated(info)).selectedModel?.let { selectedModel = it }
+                        }
+                    }
                     "message.part.delta" -> {
                         markAgentActivity()
-                        when (props?.deltaPartType()) {
-                            "text" -> sseBuffer.append(props.get("delta")?.jsonPrimitive?.content ?: "")
-                            "reasoning" -> reasoningSseBuffer.append(props.get("delta")?.jsonPrimitive?.content ?: "")
+                        val eventProps = props ?: return@collect
+                        val messageID = eventProps.eventMessageId() ?: return@collect
+                        val partID = eventProps.eventPartId() ?: return@collect
+                        val field = eventProps.deltaField() ?: return@collect
+                        val delta = eventProps.get("delta")?.jsonPrimitive?.content ?: return@collect
+                        chatState.onTimelineEvent(
+                            ChatTimelineEvent.PartDelta(
+                                sessionID = evtSid,
+                                messageID = messageID,
+                                partID = partID,
+                                field = field,
+                                delta = delta,
+                            )
+                        )
+                        when (eventProps.deltaPartType()) {
+                            "text" -> markSseTextFlushed(delta)
+                            "reasoning" -> markSseReasoningFlushed(delta)
                         }
+                        scrollNewestIntoViewIfPinned()
                     }
                     "message.part.updated" -> {
                         markAgentActivity()
                         val eventProps = props ?: return@collect
-                        val snapshot = eventProps.streamPartSnapshot() ?: return@collect
-                        when (snapshot.type) {
-                            "text" -> {
-                                if (!chatState.shouldApplyAssistantTextSnapshot(
-                                        messageId = snapshot.messageId,
-                                        role = eventProps.eventMessageRole(),
-                                        text = snapshot.text,
-                                    )
-                                ) {
-                                    return@collect
-                                }
-                                sseBuffer.clear()
-                                sseBuffer.append(snapshot.text)
+                        val part = eventProps.messagePartSnapshot(json)
+                        if (part != null) {
+                            chatState.onTimelineEvent(ChatTimelineEvent.PartUpdated(part)).selectedModel?.let { selectedModel = it }
+                            when (part.type) {
+                                "text" -> markSseTextFlushed(part.text.orEmpty())
+                                "reasoning" -> markSseReasoningFlushed(part.text.orEmpty())
                             }
-                            "reasoning" -> {
-                                reasoningSseBuffer.clear()
-                                reasoningSseBuffer.append(snapshot.text)
-                            }
+                            scrollNewestIntoViewIfPinned()
                         }
+                    }
+                    "message.part.removed" -> {
+                        markAgentActivity()
+                        val eventProps = props ?: return@collect
+                        val messageID = eventProps.eventMessageId() ?: return@collect
+                        val partID = eventProps.eventPartId() ?: return@collect
+                        chatState.onTimelineEvent(ChatTimelineEvent.PartRemoved(messageID, partID))
                     }
                     "session.status" -> {
                         val status = props?.get("status")?.jsonObject?.get("type")?.jsonPrimitive?.content
                         markAgentActivity()
+                        if (status != null) {
+                            chatState.onTimelineEvent(ChatTimelineEvent.SessionStatusChanged(evtSid, status))
+                        }
                         if (status == "idle" || status == "completed") {
                             isSending = false
-                            if (sseBuffer.isNotEmpty()) {
-                                chatState.onStreamDeltaFlush(sseBuffer.toString())
-                            }
-                            if (reasoningSseBuffer.isNotEmpty()) {
-                                chatState.onReasoningDeltaFlush(reasoningSseBuffer.toString())
-                            }
                             chatState.onCompleted()
                             scope.launch { syncServerMessagesAfterIdle() }
                         }
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w("ChatScreen", "Failed to process OpenCode SSE event", e)
+            }
         }
     }
 
@@ -740,7 +785,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                             markAgentActivity(lastChangeAt)
                             if (latestAssistant?.hasStructuredParts() == true) {
                                 chatState.onServerMessages(serverMsgs).selectedModel?.let { selectedModel = it }
-                            } else if (flushedSseText.isEmpty()) {
+                            } else if (latestStreamText.isEmpty()) {
                                 latestAssistant?.firstText()?.takeIf { it.isNotBlank() }?.let { text ->
                                     markSseTextFlushed(text)
                                     chatState.onStreamDeltaFlush(text)
@@ -754,7 +799,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             } catch (_: Exception) {}
             // No change for 20s while sending → assume server is idle
             if (System.currentTimeMillis() - lastChangeAt > 20_000 && isSending) {
-                val hadNoOutput = sseBuffer.isEmpty() && flushedSseText.isEmpty()
+                val hadNoOutput = latestStreamText.isEmpty()
                 isSending = false
                 chatState.onCompleted()
                 scope.launch { syncServerMessagesAfterIdle() }
@@ -1520,7 +1565,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                             }
                                         }
                                         .onFailure {
-                                            if (sseBuffer.isEmpty() && chatState.onSendFailure()) {
+                                            if (latestStreamText.isEmpty() && chatState.onSendFailure()) {
                                                 val msg = it.message ?: "Unknown error"
                                                 errorMsg = if (msg.contains("No suitable converter") || msg.contains("SerializationException"))
                                                     context.getString(R.string.chat_unexpected_response)

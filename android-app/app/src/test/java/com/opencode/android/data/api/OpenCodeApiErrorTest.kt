@@ -69,4 +69,32 @@ class OpenCodeApiErrorTest {
         assertFalse(OpenCodeApi.isAmbiguousPostClose(IOException("failed to connect to /127.0.0.1")))
         assertFalse(OpenCodeApi.isAmbiguousPostClose(OpenCodeHttpException(401, """{"error":{"message":"Invalid API Key"}}""")))
     }
+
+    @Test
+    fun directoryHeaderSafetyRejectsNonAsciiPaths() {
+        assertTrue("/Users/mi/Downloads/work".isHttpHeaderValueSafe())
+        assertFalse("/Users/mi/Downloads/工作".isHttpHeaderValueSafe())
+    }
+
+    @Test
+    fun sseParserFlushesStandardMultiLineDataFrame() {
+        val lines = mutableListOf<String>()
+
+        assertEquals(null, OpenCodeApi.consumeSseLine(": keepalive", lines))
+        assertEquals(null, OpenCodeApi.consumeSseLine("event: message", lines))
+        assertEquals(null, OpenCodeApi.consumeSseLine("data: {\"type\":", lines))
+        assertEquals(null, OpenCodeApi.consumeSseLine("data: \"message.updated\"}", lines))
+
+        assertEquals("{\"type\":\n\"message.updated\"}", OpenCodeApi.consumeSseLine("", lines))
+        assertTrue(lines.isEmpty())
+    }
+
+    @Test
+    fun sseParserAcceptsDataWithoutSpaceAfterColon() {
+        val lines = mutableListOf<String>()
+
+        assertEquals(null, OpenCodeApi.consumeSseLine("data:{\"type\":\"session.status\"}", lines))
+
+        assertEquals("{\"type\":\"session.status\"}", OpenCodeApi.consumeSseLine("", lines))
+    }
 }

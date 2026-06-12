@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,9 +50,17 @@ fun ThinkingBlock(
     chars: Int,
     modifier: Modifier = Modifier,
     defaultExpanded: Boolean = false,
+    stateKey: String = text,
 ) {
     val c = LocalOcColors.current
-    var open by remember(defaultExpanded) { mutableStateOf(defaultExpanded) }
+    var open by remember(stateKey) { mutableStateOf(defaultExpanded) }
+    LaunchedEffect(stateKey, defaultExpanded) {
+        if (defaultExpanded) {
+            open = true
+        } else if (open) {
+            open = false
+        }
+    }
     val rot by animateFloatAsState(if (open) 90f else 0f, tween(220), label = "tri")
 
     Column(modifier) {

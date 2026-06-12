@@ -23,6 +23,7 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Base64
 
 sealed interface PromptSendResult {
@@ -67,7 +68,8 @@ class OpenCodeApi private constructor(
 
     private val blockedCleartextMessage = publicCleartextBlockMessage(baseUrl)
 
-    private val directoryHeader = directory.takeIf { it.isNotBlank() }
+    private val directoryValue = directory.takeIf { it.isNotBlank() }
+    private val directoryHeader = directoryValue?.takeIf { it.isHttpHeaderValueSafe() }
 
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(json) }
@@ -100,6 +102,13 @@ class OpenCodeApi private constructor(
         blockedCleartextMessage?.let { throw IllegalStateException(it) }
     }
 
+    private fun HttpRequestBuilder.applyDirectory(value: String? = directoryValue) {
+        value?.takeIf { it.isNotBlank() }?.let { directory ->
+            if (directory.isHttpHeaderValueSafe()) header("x-opencode-directory", directory)
+            parameter("directory", directory)
+        }
+    }
+
     private suspend inline fun <reified T> safeRequest(request: suspend () -> HttpResponse): Result<T> = runCatching {
         ensureCleartextAllowed()
         val response = request()
@@ -112,38 +121,34 @@ class OpenCodeApi private constructor(
     }
 
     suspend fun health(): Result<HealthResponse> = safeRequest {
-        client.get("$baseUrl/global/health")
+        client.get("$baseUrl/global/health") { applyDirectory() }
     }
 
     suspend fun listSessions(directory: String? = null, roots: Boolean = false): Result<List<Session>> = safeRequest {
-        val requestedDirectory = directory ?: directoryHeader
+        val requestedDirectory = directory ?: directoryValue
         client.get("$baseUrl/experimental/session") {
-            requestedDirectory?.takeIf { it.isNotBlank() }?.let {
-                header("x-opencode-directory", it)
-                parameter("directory", it)
-            }
+            applyDirectory(requestedDirectory)
             parameter("limit", 200)
             if (roots) parameter("roots", true)
         }
     }
 
     suspend fun getSession(sessionId: String): Result<Session> = safeRequest {
-        client.get("$baseUrl/session/$sessionId")
+        client.get("$baseUrl/session/$sessionId") { applyDirectory() }
     }
 
     suspend fun fetchAgents(): Result<List<AgentInfo>> = safeRequest {
-        client.get("$baseUrl/agent")
+        client.get("$baseUrl/agent") { applyDirectory() }
     }
 
     suspend fun fetchProjects(): Result<List<Project>> = safeRequest {
-        client.get("$baseUrl/project")
+        client.get("$baseUrl/project") { applyDirectory() }
     }
 
     suspend fun fetchProjectRootFiles(directory: String): Result<List<RemoteFileEntry>> = runCatching {
         ensureCleartextAllowed()
         val response = client.get("$baseUrl/file") {
-            header("x-opencode-directory", directory)
-            parameter("directory", directory)
+            applyDirectory(directory)
         }
         if (response.status.value !in 200..299) {
             val body = try { response.bodyAsText() } catch (_: Exception) { "" }
@@ -165,16 +170,17 @@ class OpenCodeApi private constructor(
 
     /** Fetch available skills for slash-command autocomplete */
     suspend fun fetchSkills(): Result<List<SkillInfo>> = safeRequest {
-        client.get("$baseUrl/skill")
+        client.get("$baseUrl/skill") { applyDirectory() }
     }
 
     suspend fun deleteSession(sessionId: String): Result<HttpResponse> = runCatching {
         ensureCleartextAllowed()
-        client.delete("$baseUrl/session/$sessionId")
+        client.delete("$baseUrl/session/$sessionId") { applyDirectory() }
     }
 
     suspend fun createSession(title: String? = null): Result<Session> = safeRequest {
         client.post("$baseUrl/session") {
+            applyDirectory()
             contentType(ContentType.Application.Json)
             if (title != null) setBody(CreateSessionRequest(title))
             else setBody("{}")
@@ -182,7 +188,7 @@ class OpenCodeApi private constructor(
     }
 
     suspend fun getMessages(sessionId: String): Result<List<Message>> = safeRequest {
-        client.get("$baseUrl/session/$sessionId/message")
+        client.get("$baseUrl/session/$sessionId/message") { applyDirectory() }
     }
 
     /**
@@ -231,6 +237,7 @@ class OpenCodeApi private constructor(
         ensureCleartextAllowed()
         val response = try {
             longPollClient.post("$baseUrl/session/$sessionId/message") {
+                applyDirectory()
                 contentType(ContentType.Application.Json)
                 setBody(PromptRequest(parts = parts, agent = agent, model = model))
             }
@@ -283,7 +290,7 @@ class OpenCodeApi private constructor(
 
     suspend fun abort(sessionId: String): Result<HttpResponse> = runCatching {
         ensureCleartextAllowed()
-        longPollClient.post("$baseUrl/session/$sessionId/abort")
+        longPollClient.post("$baseUrl/session/$sessionId/abort") { applyDirectory() }
     }
 
     /** Fetch available providers (only configured ones, source=config). */
@@ -300,7 +307,10 @@ class OpenCodeApi private constructor(
             return flow { throw IllegalStateException(message) }
         }
         return callbackFlow {
-            val conn = (URL("$baseUrl/event").openConnection() as HttpURLConnection).apply {
+            val eventUrl = directoryValue?.let { directory ->
+                "$baseUrl/event?directory=${URLEncoder.encode(directory, Charsets.UTF_8.name())}"
+            } ?: "$baseUrl/event"
+            val conn = (URL(eventUrl).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("Accept", "text/event-stream")
                 setRequestProperty("Cache-Control", "no-cache")
@@ -315,15 +325,20 @@ class OpenCodeApi private constructor(
                 var closeCause: Throwable? = null
                 try {
                     reader = BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8))
+                    val dataLines = mutableListOf<String>()
                     while (isActive) {
                         val line = runInterruptible { reader.readLine() }
                         if (line == null) {
+                            flushSseDataLines(dataLines)?.let { data ->
+                                if (trySend(data).isFailure) return@launch
+                            }
                             closeCause = IOException("SSE connection closed")
                             break
                         }
-                        if (line.startsWith("data: ")) {
-                            val data = line.removePrefix("data: ")
-                            if (data.isNotBlank() && trySend(data).isFailure) break
+                        val data = consumeSseLine(line, dataLines)
+                        if (data != null && trySend(data).isFailure) break
+                        if (data == null && line.isEmpty() && dataLines.isEmpty()) {
+                            continue
                         }
                     }
                 } catch (_: CancellationException) {
@@ -370,6 +385,28 @@ class OpenCodeApi private constructor(
 
         internal fun publicCleartextBlockMessage(baseUrl: String): String? =
             EndpointSecurityPolicy.publicCleartextBlockMessage(baseUrl)
+
+        internal fun consumeSseLine(line: String, dataLines: MutableList<String>): String? {
+            if (line.isEmpty()) return flushSseDataLines(dataLines)
+            if (line.startsWith(":")) return null
+            val separator = line.indexOf(':')
+            val field = if (separator >= 0) line.substring(0, separator) else line
+            if (field != "data") return null
+            val value = if (separator >= 0) {
+                line.substring(separator + 1).removePrefix(" ")
+            } else {
+                ""
+            }
+            dataLines += value
+            return null
+        }
+
+        internal fun flushSseDataLines(dataLines: MutableList<String>): String? {
+            if (dataLines.isEmpty()) return null
+            val data = dataLines.joinToString("\n")
+            dataLines.clear()
+            return data.takeIf { it.isNotBlank() }
+        }
 
         internal fun isLocalOrPrivateHost(host: String): Boolean {
             return EndpointSecurityPolicy.isLocalOrPrivateHost(host)
@@ -423,3 +460,6 @@ class OpenCodeApi private constructor(
     private fun isLoopbackEndpoint(): Boolean =
         EndpointSecurityPolicy.isLoopbackUrl(baseUrl)
 }
+
+internal fun String.isHttpHeaderValueSafe(): Boolean =
+    all { it.code in 0x20..0x7E }
