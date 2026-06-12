@@ -148,6 +148,14 @@
     <string name="sessions_action_retry">Retry</string>
     <string name="sessions_error_label">Error</string>
     <string name="sessions_error_local_failed">Local runtime failed to start</string>
+    <string name="sessions_workspace_kicker">WORKSPACE</string>
+    <string name="sessions_workspace_title">Workspace</string>
+    <string name="sessions_workspace_empty">No workspaces found</string>
+    <string name="sessions_workspace_refresh">Refresh workspaces</string>
+    <string name="sessions_workspace_new">New workspace</string>
+    <string name="sessions_workspace_total">%d sessions total</string>
+    <string name="sessions_workspace_default">Default workspace</string>
+    <string name="sessions_workspace_local">Local workspace</string>
 
     <!-- Relative time -->
     <string name="time_just_now">just now</string>

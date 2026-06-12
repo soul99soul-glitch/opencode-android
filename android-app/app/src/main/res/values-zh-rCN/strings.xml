@@ -148,6 +148,14 @@
     <string name="sessions_action_retry">重试</string>
     <string name="sessions_error_label">错误</string>
     <string name="sessions_error_local_failed">本地 Runtime 启动失败</string>
+    <string name="sessions_workspace_kicker">工作区</string>
+    <string name="sessions_workspace_title">工作区</string>
+    <string name="sessions_workspace_empty">未找到工作区</string>
+    <string name="sessions_workspace_refresh">刷新工作区</string>
+    <string name="sessions_workspace_new">新建工作区</string>
+    <string name="sessions_workspace_total">共 %d 个会话</string>
+    <string name="sessions_workspace_default">默认工作区</string>
+    <string name="sessions_workspace_local">本地工作区</string>
 
     <!-- Relative time -->
     <string name="time_just_now">刚刚</string>

@@ -12,8 +12,21 @@ data class WorkspaceOption(
 
 suspend fun OpenCodeApi.fetchWorkspaceOptions(): Result<List<WorkspaceOption>> = runCatching {
     coroutineScope {
-        val projects = fetchProjects().getOrThrow()
-        val baseOptions = projects.flatMap { project ->
+        val rootSessions = listSessions(roots = true).getOrNull().orEmpty()
+        val sessionOptions = rootSessions
+            .mapNotNull { session ->
+                session.directory?.takeIf { it.isNotBlank() }?.let { directory ->
+                    WorkspaceOption(
+                        label = directory.pathLabel(),
+                        path = directory,
+                        sessionCount = session.messageCount ?: 0,
+                    )
+                }
+            }
+            .mergeSessionCounts()
+
+        val projects = fetchProjects().getOrNull().orEmpty()
+        val projectOptions = projects.flatMap { project ->
             val root = WorkspaceOption(
                 label = project.worktree.pathLabel(),
                 path = project.worktree,
@@ -33,20 +46,21 @@ suspend fun OpenCodeApi.fetchWorkspaceOptions(): Result<List<WorkspaceOption>> =
                         label = "${project.worktree.pathLabel()} / ${it.name}",
                         path = it.absolute,
                     )
-                }
+            }
             listOf(root) + sandboxes + children
         }
+
+        val baseOptions = (sessionOptions + projectOptions)
             .distinctBy { it.path }
 
         baseOptions
             .map { option ->
                 async {
-                    option.copy(
-                        sessionCount = listSessions(directory = option.path)
-                            .getOrNull()
-                            .orEmpty()
-                            .size
-                    )
+                    val sessionCount = listSessions(directory = option.path)
+                        .getOrNull()
+                        .orEmpty()
+                        .size
+                    option.copy(sessionCount = maxOf(option.sessionCount, sessionCount))
                 }
             }
             .awaitAll()
@@ -57,6 +71,16 @@ suspend fun OpenCodeApi.fetchWorkspaceOptions(): Result<List<WorkspaceOption>> =
             )
     }
 }
+
+private fun List<WorkspaceOption>.mergeSessionCounts(): List<WorkspaceOption> =
+    groupBy { it.path }
+        .map { (path, options) ->
+            val first = options.first()
+            first.copy(
+                label = first.label.ifBlank { path.pathLabel() },
+                sessionCount = options.sumOf { it.sessionCount },
+            )
+        }
 
 private fun List<WorkspaceOption>.hideEmptyParentsWithSessionChildren(): List<WorkspaceOption> {
     val hiddenParents = filter { it.sessionCount > 0 }

@@ -6,7 +6,13 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -15,7 +21,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -27,9 +38,11 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.opencode.android.R
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.text.font.FontFamily
@@ -39,9 +52,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.OpenCodeApi
+import com.opencode.android.data.api.WorkspaceOption
+import com.opencode.android.data.api.fetchWorkspaceOptions
 import com.opencode.android.data.model.ActiveEndpoint
 import com.opencode.android.data.model.ConnectionMode
+import com.opencode.android.data.model.LanProfile
+import com.opencode.android.data.model.LocalProfile
+import com.opencode.android.data.model.LocalWorkspaceProfile
 import com.opencode.android.data.model.Session
+import com.opencode.android.data.model.sanitizeLocalWorkspaceName
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.runtime.RuntimeCompanionClient
 import com.opencode.android.ui.component.*
@@ -56,6 +75,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 import java.util.*
+import kotlin.math.roundToInt
 
 @SuppressLint("LocalContextGetResourceValueCall")
 @Composable
@@ -73,7 +93,16 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
     var isCreating by remember { mutableStateOf(false) }
     var hostPort by remember { mutableStateOf(context.getString(R.string.settings_value_loading)) }
     val endpoint by prefs.activeEndpoint.collectAsState(initial = null)
+    val lanProfile by prefs.lanProfile.collectAsState(initial = LanProfile())
+    val localProfile by prefs.localProfile.collectAsState(initial = LocalProfile())
+    val localWorkspaceProfiles by prefs.localWorkspaceProfiles.collectAsState(initial = emptyList())
+    val pinnedWorkspaces by prefs.pinnedWorkspaces.collectAsState(initial = emptySet())
     var refreshJob by remember { mutableStateOf<Job?>(null) }
+    var drawerOpen by remember { mutableStateOf(false) }
+    var drawerDragOffsetPx by remember { mutableFloatStateOf(Float.NaN) }
+    var workspaceOptions by remember { mutableStateOf<List<WorkspaceOption>>(emptyList()) }
+    var workspaceLoading by remember { mutableStateOf(false) }
+    var workspaceError by remember { mutableStateOf<String?>(null) }
 
     fun Throwable?.isLocalRuntimeConnectFailure(): Boolean {
         val msg = this?.message.orEmpty()
@@ -177,9 +206,68 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
         }
     }
 
+    suspend fun loadRemoteWorkspaces(active: ActiveEndpoint? = endpoint) {
+        active ?: return
+        if (active.mode != ConnectionMode.LAN || workspaceLoading) return
+        workspaceLoading = true
+        workspaceError = null
+        val discoveryEndpoint = active.copy(directory = "")
+        val api = OpenCodeApi(discoveryEndpoint)
+        try {
+            api.fetchWorkspaceOptions()
+                .onSuccess {
+                    val current = prefs.activeEndpoint.first()
+                    if (current.mode == active.mode && current.baseUrl == active.baseUrl && current.password == active.password) {
+                        workspaceOptions = it
+                    }
+                }
+                .onFailure {
+                    val current = prefs.activeEndpoint.first()
+                    if (current.mode == active.mode && current.baseUrl == active.baseUrl && current.password == active.password) {
+                        workspaceError = it.message ?: context.getString(R.string.status_failed_load_workspaces)
+                    }
+                }
+        } finally {
+            api.close()
+            workspaceLoading = false
+        }
+    }
+
+    suspend fun selectWorkspace(option: WorkspaceOption) {
+        val active = endpoint ?: return
+        when (active.mode) {
+            ConnectionMode.LAN -> {
+                workspaceOptions = emptyList()
+                workspaceError = null
+                prefs.saveLanProfile(prefs.lanProfile.first().copy(directory = option.path))
+            }
+            ConnectionMode.LOCAL_BUNDLED, ConnectionMode.LOCAL_EXTERNAL -> {
+                prefs.saveLocalProfile(
+                    localProfile.copy(
+                        workspacePath = sanitizeLocalWorkspaceName(option.path),
+                        workspaceTreeUri = "",
+                    )
+                )
+            }
+        }
+        drawerOpen = false
+    }
+
+    suspend fun selectLocalWorkspace(profile: LocalWorkspaceProfile) {
+        prefs.saveLocalProfile(
+            localProfile.copy(
+                workspacePath = profile.name,
+                workspaceTreeUri = profile.treeUri,
+            )
+        )
+        drawerOpen = false
+    }
+
     LaunchedEffect(endpoint?.identityKey) {
         sessions = emptyList()
         sessionPreviews = emptyMap()
+        workspaceOptions = emptyList()
+        workspaceError = null
         error = null
         val active = endpoint
         if (active == null) {
@@ -187,6 +275,13 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
             hostPort = context.getString(R.string.settings_value_loading)
         } else {
             refreshNow(active)
+        }
+    }
+
+    LaunchedEffect(drawerOpen, endpoint?.identityKey) {
+        val active = endpoint ?: return@LaunchedEffect
+        if (drawerOpen && active.mode == ConnectionMode.LAN && workspaceOptions.isEmpty()) {
+            loadRemoteWorkspaces(active)
         }
     }
 
@@ -206,7 +301,71 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Box(Modifier.fillMaxSize().background(c.bg).statusBarsPadding()) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(c.bg)) {
+        val drawerWidth = (maxWidth * 0.82f).coerceAtMost(330.dp)
+        val drawerWidthPx = with(LocalDensity.current) { drawerWidth.toPx() }
+        val targetOffsetPx = if (drawerOpen) drawerWidthPx else 0f
+        val isDraggingDrawer = !drawerDragOffsetPx.isNaN()
+        val settledOffsetPx = if (isDraggingDrawer) drawerDragOffsetPx else targetOffsetPx
+        val settledOffsetDp = with(LocalDensity.current) { settledOffsetPx.toDp() }
+        val animatedSessionOffset by animateDpAsState(
+            targetValue = settledOffsetDp,
+            animationSpec = tween(240),
+            label = "workspace-drawer",
+        )
+        val animatedSessionOffsetPx = with(LocalDensity.current) { animatedSessionOffset.toPx() }
+        val revealProgress = if (drawerWidthPx == 0f) 0f else (settledOffsetPx / drawerWidthPx).coerceIn(0f, 1f)
+
+        WorkspaceRail(
+            modifier = Modifier
+                .width(drawerWidth)
+                .fillMaxHeight()
+                .statusBarsPadding(),
+            endpoint = endpoint,
+            sessions = sessions,
+            lanWorkspaces = workspaceOptions,
+            lanSelectedPath = lanProfile.directory,
+            localProfiles = localWorkspaceProfiles,
+            localSelectedId = localWorkspaceProfiles.firstOrNull {
+                it.name == localProfile.workspacePath && it.treeUri == localProfile.workspaceTreeUri
+            }?.id.orEmpty(),
+            loading = workspaceLoading,
+            error = workspaceError,
+            pinnedPaths = pinnedWorkspaces,
+            onRefresh = { scope.launch { loadRemoteWorkspaces() } },
+            onSelectRemote = { option -> scope.launch { selectWorkspace(option) } },
+            onSelectLocal = { profile -> scope.launch { selectLocalWorkspace(profile) } },
+            onTogglePinned = { path -> scope.launch { prefs.togglePinnedWorkspace(path) } },
+            onNewWorkspace = onSettingsClick,
+        )
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .offset {
+                    IntOffset(
+                        x = (if (isDraggingDrawer) settledOffsetPx else animatedSessionOffsetPx).roundToInt(),
+                        y = 0,
+                    )
+                }
+                .background(c.bg)
+                .pointerInput(drawerOpen, drawerWidthPx) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            drawerOpen = drawerDragOffsetPx > drawerWidthPx * 0.42f
+                            drawerDragOffsetPx = Float.NaN
+                        },
+                        onDragCancel = { drawerDragOffsetPx = Float.NaN },
+                        onHorizontalDrag = { _, dragAmount ->
+                            val current = if (!drawerDragOffsetPx.isNaN()) drawerDragOffsetPx else targetOffsetPx
+                            if (current > 0f || dragAmount > 0f) {
+                                drawerDragOffsetPx = (current + dragAmount).coerceIn(0f, drawerWidthPx)
+                            }
+                        },
+                    )
+                }
+                .statusBarsPadding(),
+        ) {
         Column(Modifier.fillMaxSize()) {
             // ── Top bar ──
             Row(
@@ -372,17 +531,26 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                                         .fillMaxWidth()
                                         .offset(x = animatedOffset)
                                         .background(c.bg)
-                                        .pointerInput(session.id) {
-                                            detectHorizontalDragGestures(
-                                                onDragEnd = {
-                                                    swipeOffset = if (swipeOffset < -deleteWidthPx * 0.5f)
-                                                        -deleteWidthPx else 0f
-                                                },
-                                                onHorizontalDrag = { _, dragAmount ->
-                                                    val newOffset = swipeOffset + dragAmount
-                                                    swipeOffset = newOffset.coerceIn(-deleteWidthPx, 0f)
-                                                },
-                                            )
+                                        .pointerInput(session.id, deleteWidthPx) {
+                                            awaitEachGesture {
+                                                val down = awaitFirstDown(requireUnconsumed = false)
+                                                var pastSlop = 0f
+                                                val drag = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                                                    if (over < 0f || swipeOffset < 0f) {
+                                                        pastSlop = over
+                                                        change.consume()
+                                                    }
+                                                }
+                                                if (drag != null && (pastSlop < 0f || swipeOffset < 0f)) {
+                                                    swipeOffset = (swipeOffset + pastSlop).coerceIn(-deleteWidthPx, 0f)
+                                                    horizontalDrag(drag.id) { change ->
+                                                        val dragAmount = change.positionChange().x
+                                                        swipeOffset = (swipeOffset + dragAmount).coerceIn(-deleteWidthPx, 0f)
+                                                        change.consume()
+                                                    }
+                                                    swipeOffset = if (swipeOffset < -deleteWidthPx * 0.5f) -deleteWidthPx else 0f
+                                                }
+                                            }
                                         }
                                 ) {
                                     SessionRow(
@@ -431,7 +599,249 @@ fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: (
                 }
             }
         }
+
+            if (revealProgress > 0f) {
+                Box(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxHeight()
+                        .width(1.dp)
+                        .background(c.line.copy(alpha = 0.75f * revealProgress))
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun WorkspaceRail(
+    endpoint: ActiveEndpoint?,
+    sessions: List<Session>,
+    lanWorkspaces: List<WorkspaceOption>,
+    lanSelectedPath: String,
+    localProfiles: List<LocalWorkspaceProfile>,
+    localSelectedId: String,
+    loading: Boolean,
+    error: String?,
+    pinnedPaths: Set<String>,
+    onRefresh: () -> Unit,
+    onSelectRemote: (WorkspaceOption) -> Unit,
+    onSelectLocal: (LocalWorkspaceProfile) -> Unit,
+    onTogglePinned: (String) -> Unit,
+    onNewWorkspace: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val c = LocalOcColors.current
+    val isLan = endpoint?.mode == ConnectionMode.LAN
+    val remoteRows = remember(lanWorkspaces, pinnedPaths) {
+        val sorted = lanWorkspaces.sortedWith(
+            compareByDescending<WorkspaceOption> { it.path in pinnedPaths }
+                .thenByDescending { it.sessionCount }
+                .thenBy { it.label.lowercase(Locale.ROOT) }
+        )
+        sorted
+    }
+    val totalSessions = if (isLan) {
+        remoteRows.sumOf { it.sessionCount }.takeIf { it > 0 } ?: sessions.size
+    } else {
+        sessions.size
+    }
+
+    Column(modifier.background(c.bg)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp, vertical = 28.dp),
+        ) {
+            Text(
+                stringResource(R.string.sessions_workspace_kicker),
+                style = OcType.mono.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                color = c.ink3,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.sessions_workspace_title),
+                style = OcType.brand.copy(fontSize = 28.sp),
+                color = c.ink,
+            )
+        }
+        Hairline()
+
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            if (isLan) {
+                if (loading && remoteRows.isEmpty()) {
+                    WorkspaceRailStatusRow(stringResource(R.string.settings_value_loading))
+                }
+                if (error != null && remoteRows.isEmpty()) {
+                    WorkspaceRailStatusRow(error)
+                }
+                remoteRows.forEachIndexed { index, option ->
+                    WorkspaceRailRow(
+                        icon = when (index % 4) {
+                            0 -> WorkspaceIcon.Folder
+                            1 -> WorkspaceIcon.Code
+                            2 -> WorkspaceIcon.Person
+                            else -> WorkspaceIcon.Bolt
+                        },
+                        title = option.label,
+                        subtitle = stringResource(R.string.workspace_sessions_count, option.sessionCount),
+                        selected = option.path == lanSelectedPath,
+                        dim = option.sessionCount == 0,
+                        pinned = option.path in pinnedPaths,
+                        onClick = { onSelectRemote(option) },
+                        onLongClick = { onTogglePinned(option.path) },
+                    )
+                    Hairline()
+                }
+                if (!loading && remoteRows.isEmpty() && error == null) {
+                    WorkspaceRailStatusRow(stringResource(R.string.sessions_workspace_empty))
+                }
+            } else {
+                localProfiles.forEachIndexed { index, profile ->
+                    val count = if (profile.id == localSelectedId) sessions.size else 0
+                    WorkspaceRailRow(
+                        icon = when (index % 4) {
+                            0 -> WorkspaceIcon.Code
+                            1 -> WorkspaceIcon.Folder
+                            2 -> WorkspaceIcon.Person
+                            else -> WorkspaceIcon.Bolt
+                        },
+                        title = profile.name.ifBlank { stringResource(R.string.sessions_workspace_default) },
+                        subtitle = if (count > 0) {
+                            stringResource(R.string.workspace_sessions_count, count)
+                        } else if (profile.treeUri.isNotBlank()) {
+                            stringResource(R.string.workspace_linked_folder)
+                        } else {
+                            stringResource(R.string.sessions_workspace_local)
+                        },
+                        selected = profile.id == localSelectedId,
+                        dim = false,
+                        pinned = false,
+                        onClick = { onSelectLocal(profile) },
+                    )
+                    Hairline()
+                }
+            }
+        }
+
+        Hairline()
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp, vertical = 18.dp)
+                .pressable {
+                    if (isLan) onRefresh() else onNewWorkspace()
+                }
+                .background(Color.Transparent, RoundedCornerShape(14.dp))
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(
+                    imageVector = if (isLan) Icons.Default.Refresh else Icons.Default.Add,
+                    contentDescription = null,
+                    tint = c.ink3,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    if (isLan) stringResource(R.string.sessions_workspace_refresh) else stringResource(R.string.sessions_workspace_new),
+                    style = OcType.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = c.ink3,
+                )
+            }
+        }
+        Text(
+            stringResource(R.string.sessions_workspace_total, totalSessions),
+            style = OcType.mono.copy(fontSize = 11.sp),
+            color = c.ink4,
+            modifier = Modifier.padding(start = 22.dp, end = 22.dp, bottom = 10.dp),
+        )
+    }
+}
+
+private enum class WorkspaceIcon { Code, Folder, Person, Bolt }
+
+@Composable
+private fun WorkspaceRailRow(
+    icon: WorkspaceIcon,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    dim: Boolean,
+    pinned: Boolean,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    val c = LocalOcColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressable(onLongClick = onLongClick, onClick = onClick)
+            .padding(horizontal = 22.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(52.dp)
+                .background(if (selected) c.accent else c.surface2, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            val tint = if (selected) c.accentInk else c.ink3
+            when (icon) {
+                WorkspaceIcon.Code -> Text("</>", style = OcType.monoStrong.copy(fontSize = 16.sp), color = tint)
+                WorkspaceIcon.Folder -> Icon(Icons.Default.Folder, contentDescription = null, tint = tint, modifier = Modifier.size(25.dp))
+                WorkspaceIcon.Person -> Icon(Icons.Default.Person, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                WorkspaceIcon.Bolt -> Icon(Icons.Default.Bolt, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+            }
+        }
+        Spacer(Modifier.width(18.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = OcType.rowTitle.copy(fontSize = 21.sp),
+                color = when {
+                    selected -> c.ink
+                    dim -> c.ink3
+                    else -> c.ink
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                subtitle,
+                style = OcType.body.copy(fontSize = 15.sp),
+                color = c.ink3,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (selected || pinned) {
+            Box(
+                Modifier
+                    .size(if (selected) 10.dp else 7.dp)
+                    .clip(CircleShape)
+                    .background(if (selected) c.accent else c.ink4)
+            )
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceRailStatusRow(text: String) {
+    val c = LocalOcColors.current
+    Text(
+        text,
+        style = OcType.body,
+        color = c.ink3,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp, vertical = 18.dp),
+    )
 }
 
 /** 毫秒级时间戳 → 相对时间文案 */
