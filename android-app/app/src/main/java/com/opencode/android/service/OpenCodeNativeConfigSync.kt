@@ -2,7 +2,9 @@ package com.opencode.android.service
 
 import com.opencode.android.data.model.McpConfigSource
 import com.opencode.android.data.model.McpServerConfig
+import com.opencode.android.data.model.EndpointSecurityPolicy
 import com.opencode.android.data.model.parsePluginSpecs
+import com.opencode.android.runtime.RuntimeContract
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -84,7 +86,20 @@ object OpenCodeNativeConfigSync {
             JsonObject(emptyMap())
         }
 
-        val validServers = servers.filter { it.name.isNotBlank() && it.url.trim().startsWith("http") }
+        val validServers = servers.filter {
+            it.name.isNotBlank() && it.url.trim().startsWith("http", ignoreCase = true)
+        }
+        validServers.firstNotNullOfOrNull { server ->
+            EndpointSecurityPolicy.publicCleartextBlockMessage(server.url.trim())?.let { message ->
+                server.name.trim() to message
+            }
+        }?.let { (name, message) ->
+            throw IllegalArgumentException("MCP server $name uses an insecure endpoint: $message")
+        }
+        val collisions = RuntimeContract.mcpTokenEnvCollisions(validServers.map { it.name.trim() })
+        require(collisions.isEmpty()) {
+            "MCP token env collision: " + collisions.values.joinToString { it.joinToString(" / ") }
+        }
         val validPlugins = pluginSpecs.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
         val merged = buildJsonObject {
@@ -95,7 +110,7 @@ object OpenCodeNativeConfigSync {
                 putJsonObject("mcp") {
                     validServers.forEach { server ->
                         val token = tokensByName[server.name].orEmpty().trim()
-                        val tokenEnv = "OPENCODE_MCP_TOKEN_${sanitizeEnvName(server.name.trim())}"
+                        val tokenEnv = RuntimeContract.mcpTokenEnvForName(server.name.trim())
                         putJsonObject(server.name.trim()) {
                             put("type", "remote")
                             put("url", server.url.trim())
@@ -197,12 +212,6 @@ object OpenCodeNativeConfigSync {
         val changed: Boolean,
         val tokensToImport: Map<String, String>,
     )
-
-    private fun sanitizeEnvName(name: String): String = name
-        .replace(Regex("[^A-Za-z0-9_]"), "_")
-        .trim('_')
-        .ifBlank { "unnamed" }
-        .uppercase()
 
     private fun parseRoot(raw: String, allowComments: Boolean): JsonObject {
         val trimmed = if (allowComments) stripJsonComments(raw.trim()) else raw.trim()

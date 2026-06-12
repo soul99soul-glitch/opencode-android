@@ -8,6 +8,7 @@ import com.opencode.android.data.model.ActiveEndpoint
 import com.opencode.android.data.model.ConnectionMode
 import com.opencode.android.data.model.LanProfile
 import com.opencode.android.data.model.LocalProfile
+import com.opencode.android.data.model.LocalWorkspaceProfile
 import com.opencode.android.data.model.LocalProviderDefaults
 import com.opencode.android.data.model.LocalProviderProfile
 import com.opencode.android.data.model.LocalProviderPresets
@@ -23,6 +24,9 @@ import com.opencode.android.service.OpenCodeNativeConfigSync
 import com.opencode.android.data.model.toActiveEndpoint
 import com.opencode.android.data.model.toLanProfile
 import com.opencode.android.data.model.toServerConfig
+import com.opencode.android.data.model.appLocalWorkspaceProfile
+import com.opencode.android.data.model.safLocalWorkspaceProfile
+import com.opencode.android.runtime.RuntimeContract
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -58,6 +62,7 @@ class PreferencesRepository(context: Context) {
         val LOCAL_WORKSPACE = stringPreferencesKey("local_workspace")
         val LOCAL_WORKSPACE_TREE_URI = stringPreferencesKey("local_workspace_tree_uri")
         val LOCAL_WORKSPACE_NAMES = stringSetPreferencesKey("local_workspace_names")
+        val LOCAL_WORKSPACE_PROFILES = stringPreferencesKey("local_workspace_profiles")
         val LOCAL_AUTO_START = booleanPreferencesKey("local_auto_start")
         val HOST = stringPreferencesKey("host")
         val PORT = intPreferencesKey("port")
@@ -132,13 +137,26 @@ class PreferencesRepository(context: Context) {
         )
     }.distinctUntilChanged()
 
-    val localWorkspaceNames: Flow<List<String>> = appContext.dataStore.data.map { prefs ->
+    val localWorkspaceProfiles: Flow<List<LocalWorkspaceProfile>> = appContext.dataStore.data.map { prefs ->
         val current = sanitizeLocalWorkspaceName(prefs[Keys.LOCAL_WORKSPACE] ?: defaultLocalWorkspace())
+        val currentTreeUri = prefs[Keys.LOCAL_WORKSPACE_TREE_URI].orEmpty()
+        val currentProfile = if (currentTreeUri.isBlank()) {
+            appLocalWorkspaceProfile(current, lastUsedAt = 0)
+        } else {
+            safLocalWorkspaceProfile(current, currentTreeUri, lastUsedAt = 0)
+        }
+        val profiles = decodeLocalWorkspaceProfiles(prefs[Keys.LOCAL_WORKSPACE_PROFILES])
         val saved = prefs[Keys.LOCAL_WORKSPACE_NAMES].orEmpty()
             .map(::sanitizeLocalWorkspaceName)
-        (saved + current + defaultLocalWorkspace())
-            .distinct()
-            .sortedWith(compareBy<String> { it != defaultLocalWorkspace() }.thenBy { it.lowercase() })
+            .map { appLocalWorkspaceProfile(it, lastUsedAt = 0) }
+        (profiles + saved + currentProfile + appLocalWorkspaceProfile(defaultLocalWorkspace(), lastUsedAt = 0))
+            .distinctBy { it.id }
+            .sortedWith(compareByDescending<LocalWorkspaceProfile> { it.id == currentProfile.id }.thenByDescending { it.lastUsedAt })
+            .take(MAX_LOCAL_WORKSPACES)
+    }.distinctUntilChanged()
+
+    val localWorkspaceNames: Flow<List<String>> = localWorkspaceProfiles.map { profiles ->
+        profiles.map { it.name }.distinct()
     }.distinctUntilChanged()
 
     val localProviderProfile: Flow<LocalProviderProfile> = appContext.dataStore.data.map { prefs ->
@@ -229,6 +247,11 @@ class PreferencesRepository(context: Context) {
 
     suspend fun saveLocalProfile(profile: LocalProfile) {
         val workspaceName = sanitizeLocalWorkspaceName(profile.workspacePath)
+        val workspaceProfile = if (profile.workspaceTreeUri.isBlank()) {
+            appLocalWorkspaceProfile(workspaceName)
+        } else {
+            safLocalWorkspaceProfile(workspaceName, profile.workspaceTreeUri)
+        }
         appContext.dataStore.edit { prefs ->
             prefs[Keys.LOCAL_BUNDLED_PORT] = profile.bundledPort
             prefs[Keys.LOCAL_EXTERNAL_PORT] = profile.externalPort
@@ -237,6 +260,12 @@ class PreferencesRepository(context: Context) {
                 .map(::sanitizeLocalWorkspaceName)
                 .filter { it.isNotBlank() }
                 .toSet()
+            val existing = decodeLocalWorkspaceProfiles(prefs[Keys.LOCAL_WORKSPACE_PROFILES])
+            prefs[Keys.LOCAL_WORKSPACE_PROFILES] = encodeLocalWorkspaceProfiles(
+                (existing.filterNot { it.id == workspaceProfile.id } + workspaceProfile)
+                    .sortedByDescending { it.lastUsedAt }
+                    .take(MAX_LOCAL_WORKSPACES),
+            )
             if (profile.workspaceTreeUri.isBlank()) {
                 prefs.remove(Keys.LOCAL_WORKSPACE_TREE_URI)
             } else {
@@ -413,6 +442,10 @@ class PreferencesRepository(context: Context) {
     }
 
     suspend fun saveMcpServers(servers: List<McpServerConfig>) {
+        val collisions = RuntimeContract.mcpTokenEnvCollisions(servers.map { it.name.trim() }.filter { it.isNotBlank() })
+        require(collisions.isEmpty()) {
+            "MCP token env collision: " + collisions.values.joinToString { it.joinToString(" / ") }
+        }
         val encoded = json.encodeToString(ListSerializer(McpServerConfig.serializer()), servers)
         appContext.dataStore.edit { it[Keys.LOCAL_MCP_SERVERS] = encoded }
     }
@@ -486,6 +519,10 @@ class PreferencesRepository(context: Context) {
     /** Write current MCP / plugin prefs to the agent-native opencode.json. */
     suspend fun exportMcpAndPluginsToNative() = withContext(Dispatchers.IO) {
         val servers = localMcpServers.first()
+        val collisions = RuntimeContract.mcpTokenEnvCollisions(servers.map { it.name.trim() }.filter { it.isNotBlank() })
+        require(collisions.isEmpty()) {
+            "MCP token env collision: " + collisions.values.joinToString { it.joinToString(" / ") }
+        }
         val plugins = parsePluginSpecs(localPlugins.first())
         val tokens = servers.associate { server ->
             server.name to if (server.hasToken) getMcpToken(server.name) else ""
@@ -509,6 +546,16 @@ class PreferencesRepository(context: Context) {
 
     private fun encodeStringSet(values: Set<String>): String =
         json.encodeToString(ListSerializer(String.serializer()), values.sorted())
+
+    private fun decodeLocalWorkspaceProfiles(raw: String?): List<LocalWorkspaceProfile> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            json.decodeFromString(ListSerializer(LocalWorkspaceProfile.serializer()), raw)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeLocalWorkspaceProfiles(values: List<LocalWorkspaceProfile>): String =
+        json.encodeToString(ListSerializer(LocalWorkspaceProfile.serializer()), values)
 
     private fun mcpTokenName(name: String): String = "$SECURE_MCP_TOKEN:${name.trim()}"
 
@@ -571,6 +618,7 @@ class PreferencesRepository(context: Context) {
         const val SECURE_LOCAL_PROVIDER_API_KEY = "local_provider_api_key"
         const val SECURE_LOCAL_SERVER_PASSWORD = "local_server_password"
         const val SECURE_MCP_TOKEN = "mcp_token"
+        const val MAX_LOCAL_WORKSPACES = 20
 
         fun generateLocalServerPassword(): String {
             val bytes = ByteArray(32)

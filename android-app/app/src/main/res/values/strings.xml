@@ -170,6 +170,12 @@
     <string name="chat_loading_agents">Loading agents…</string>
     <string name="chat_no_response">No response received — server may have failed to process the prompt</string>
     <string name="chat_unexpected_response">Unexpected server response</string>
+    <string name="chat_status_ready">ready</string>
+    <string name="chat_status_complete">done</string>
+    <string name="chat_status_thinking">thinking…</string>
+    <string name="chat_status_tool">tools…</string>
+    <string name="chat_status_generating">generating…</string>
+    <string name="chat_status_stalled">stalled</string>
 
     <!-- Command descriptions -->
     <string name="chat_cmd_review">Code review</string>
@@ -182,6 +188,7 @@
     <string name="chat_thinking">Thinking…</string>
     <string name="chat_thinking_collapsed">Thinking</string>
     <string name="chat_chars_count">%d chars</string>
+    <string name="chat_no_final_text">No final response text</string>
     <string name="chat_empty_prompt">What would you like to build?</string>
     <string name="chat_suggest_explain">Explain this codebase</string>
     <string name="chat_suggest_bugs">Find bugs in my code</string>
@@ -219,6 +226,7 @@
     <string name="local_provider_coding_base">Coding Base</string>
     <string name="local_provider_api_key">API Key</string>
     <string name="local_provider_model">Model</string>
+    <string name="local_provider_model_id">Model ID</string>
     <string name="local_provider_fetching">Fetching…</string>
     <string name="local_provider_choose">Choose…</string>
     <string name="local_provider_loading_models">Loading models…</string>
@@ -241,6 +249,7 @@
     <string name="workspace_sessions_count">%d sessions</string>
     <string name="workspace_current">current</string>
     <string name="workspace_open">open</string>
+    <string name="workspace_linked_folder">linked folder</string>
 
     <!-- MCP field placeholders -->
     <string name="mcp_field_name">name</string>

@@ -2,7 +2,9 @@ package com.opencode.android.data.api
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 class OpenCodeApiErrorTest {
     @Test
@@ -58,5 +60,13 @@ class OpenCodeApiErrorTest {
             "Authentication failed (HTTP 401): Invalid API Key",
             formatHttpError(401, body),
         )
+    }
+
+    @Test
+    fun ambiguousPostCloseDetectionIsNarrow() {
+        assertTrue(OpenCodeApi.isAmbiguousPostClose(IOException("unexpected end of stream on http://127.0.0.1:4097/...")))
+        assertTrue(OpenCodeApi.isAmbiguousPostClose(IOException("stream was reset: CANCEL")))
+        assertFalse(OpenCodeApi.isAmbiguousPostClose(IOException("failed to connect to /127.0.0.1")))
+        assertFalse(OpenCodeApi.isAmbiguousPostClose(OpenCodeHttpException(401, """{"error":{"message":"Invalid API Key"}}""")))
     }
 }

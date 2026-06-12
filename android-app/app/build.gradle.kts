@@ -1,8 +1,29 @@
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+val releaseStoreFile = providers.gradleProperty("OPENCODE_RELEASE_STORE_FILE")
+    .orElse(providers.environmentVariable("OPENCODE_RELEASE_STORE_FILE"))
+    .orNull
+val releaseStorePassword = providers.gradleProperty("OPENCODE_RELEASE_STORE_PASSWORD")
+    .orElse(providers.environmentVariable("OPENCODE_RELEASE_STORE_PASSWORD"))
+    .orNull
+val releaseKeyAlias = providers.gradleProperty("OPENCODE_RELEASE_KEY_ALIAS")
+    .orElse(providers.environmentVariable("OPENCODE_RELEASE_KEY_ALIAS"))
+    .orNull
+val releaseKeyPassword = providers.gradleProperty("OPENCODE_RELEASE_KEY_PASSWORD")
+    .orElse(providers.environmentVariable("OPENCODE_RELEASE_KEY_PASSWORD"))
+    .orNull
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.opencode.android"
@@ -17,11 +38,13 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("release.keystore")
-            storePassword = "opencode2026"
-            keyAlias = "release"
-            keyPassword = "opencode2026"
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -32,7 +55,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -66,6 +91,76 @@ android {
             assets.srcDir(rootProject.file("runtime/src/main/assets"))
         }
     }
+}
+
+val verifyRuntimePayload by tasks.registering {
+    val runtimeDir = rootProject.file("runtime/src/main")
+    val required = listOf(
+        runtimeDir.resolve("jniLibs/arm64-v8a/libopencode_runtime.so"),
+        runtimeDir.resolve("assets/runtime_support/lib/glibc/ld-linux-aarch64.so.1"),
+        runtimeDir.resolve("assets/runtime_support/lib/openssl/libcrypto.so.3"),
+        runtimeDir.resolve("assets/runtime_support/lib/openssl/libssl.so.3"),
+        runtimeDir.resolve("assets/runtime_support/share/certs/ca-bundle.crt"),
+        runtimeDir.resolve("assets/runtime_support/cache/providers/@ai-sdk/openai-compatible/ready.marker"),
+        runtimeDir.resolve("assets/runtime_support/share/opencode-runtime/git-tools.tsv"),
+        runtimeDir.resolve("assets/runtime_support/share/git-core/templates"),
+        runtimeDir.resolve("assets/runtime_support/tool_payload/bin/git"),
+        runtimeDir.resolve("assets/runtime_support/tool_payload/libexec/git-core/git-remote-http"),
+        runtimeDir.resolve("assets/runtime_support/tool_payload/libexec/git-core/git-remote-https"),
+        runtimeDir.resolve("jniLibs/arm64-v8a/libglibc_loader.so"),
+        runtimeDir.resolve("jniLibs/arm64-v8a/libgit.so"),
+    )
+    inputs.files(required)
+    doLast {
+        val missing = required.filterNot { it.exists() }
+        if (missing.isNotEmpty()) {
+            throw GradleException(
+                "OpenCode runtime payload is missing:\n" +
+                    missing.joinToString("\n") { " - ${it.relativeTo(rootProject.projectDir)}" } +
+                    "\nRun android-app/runtime/tools/import-opencode-runtime.sh before building the app.",
+            )
+        }
+    }
+}
+
+val verifyDebugApkRuntimePayload by tasks.registering {
+    dependsOn("assembleDebug")
+    val apk = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk")
+    inputs.file(apk)
+    doLast {
+        val apkFile = apk.get().asFile
+        if (!apkFile.isFile) {
+            throw GradleException("Debug APK is missing: ${apkFile.relativeTo(projectDir)}")
+        }
+        val requiredEntries = listOf(
+            "lib/arm64-v8a/libopencode_runtime.so",
+            "assets/runtime_support/lib/glibc/ld-linux-aarch64.so.1",
+            "assets/runtime_support/lib/openssl/libcrypto.so.3",
+            "assets/runtime_support/lib/openssl/libssl.so.3",
+            "assets/runtime_support/share/certs/ca-bundle.crt",
+            "assets/runtime_support/cache/providers/@ai-sdk/openai-compatible/ready.marker",
+            "assets/runtime_support/share/opencode-runtime/git-tools.tsv",
+            "assets/runtime_support/share/git-core/templates/description",
+            "assets/runtime_support/tool_payload/bin/git",
+            "assets/runtime_support/tool_payload/libexec/git-core/git-remote-http",
+            "assets/runtime_support/tool_payload/libexec/git-core/git-remote-https",
+            "lib/arm64-v8a/libglibc_loader.so",
+            "lib/arm64-v8a/libgit.so",
+        )
+        ZipFile(apkFile).use { zip ->
+            val missing = requiredEntries.filter { zip.getEntry(it) == null }
+            if (missing.isNotEmpty()) {
+                throw GradleException(
+                    "Debug APK is missing runtime payload entries:\n" +
+                        missing.joinToString("\n") { " - $it" },
+                )
+            }
+        }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(verifyRuntimePayload)
 }
 
 dependencies {

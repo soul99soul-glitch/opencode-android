@@ -36,6 +36,7 @@ internal fun SettingsLocalProviderSection(
     onCodingBaseUrlChange: (String) -> Unit,
     providerApiKeyDraft: String,
     onApiKeyChange: (String) -> Unit,
+    onApiKeyEditingComplete: () -> Unit,
     providerHasSavedKey: Boolean,
     onClearKey: () -> Unit,
     selectedProviderModel: String,
@@ -44,6 +45,7 @@ internal fun SettingsLocalProviderSection(
     providerModelCandidates: List<String>,
     onModelRowClick: () -> Unit,
     onFetchModels: () -> Unit,
+    onModelChange: (String) -> Unit,
     onSelectModel: (String) -> Unit,
     providerValidationMessage: String?,
     providerStatus: String?,
@@ -101,6 +103,7 @@ internal fun SettingsLocalProviderSection(
             hasSavedKey = providerHasSavedKey,
             value = providerApiKeyDraft,
             onValueChange = onApiKeyChange,
+            onEditingComplete = onApiKeyEditingComplete,
             onClear = { onClearKey() },
         )
         Hairline()
@@ -123,6 +126,12 @@ internal fun SettingsLocalProviderSection(
                 )
             }
         }
+        Hairline()
+        EditableSettingsRow(
+            label = stringResource(R.string.local_provider_model_id),
+            value = selectedProviderModel,
+            onValueChange = onModelChange,
+        )
         Hairline()
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),

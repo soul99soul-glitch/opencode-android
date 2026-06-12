@@ -7,7 +7,7 @@
 它能连接已经运行的 OpenCode server，在手机上查看会话、发送消息、接收流式回复。你可以把它理解成 OpenCode 的移动端界面，而不是另一个通用聊天 App。
 
 > [!IMPORTANT]
-> 项目还在早期阶段，目前没有稳定版，也没有把可用的 OpenCode 二进制打进 APK。最省事的用法是先在电脑或 Termux 中运行 `opencode serve`，再让 App 连接过去。
+> 项目还在早期阶段，目前没有稳定版。局域网模式仍然是最稳妥的路径：先在电脑或 Termux 中运行 `opencode serve`，再让 App 连接过去。Bundled Local 模式仍属实验功能，源码构建前需要先导入 runtime payload。
 
 本项目与 OpenCode 官方无关。
 
@@ -24,25 +24,25 @@
 - 展示工具调用，并提供子会话跳转入口
 - 保存连接、外观、agent 和 model 设置
 - 切换浅色、深色主题和强调色
+- 实验性的 Bundled Local 模式：主 App 可以打包 arm64 OpenCode runtime，并由 `OpenCodeService` 托管启动
 
 ## 还没做好什么
 
-- APK 内置 OpenCode runtime
-- 完全由 App 启动和管理本地 OpenCode server
+- arm64 测试设备之外的 Bundled Local 兼容性
+- 在激进 OEM Android 后台限制下，local runtime 的生产级保活体验
 - 稳定的 Termux 交接流程
 - 网络切换和 Android 后台限制下的 SSE 重连
 - 正式签名、发布和自动更新
 - 完整的自动化测试
 
-仓库里已经有 `OpenCodeService` 和 `ProcessManager`，会尝试从以下位置寻找可执行文件：
+当前 local runtime 架构是 Option C：主 App 打包 native runtime 和 support assets，将可执行体解压到 `nativeLibraryDir`，并由 `OpenCodeService` 启动。
 
 ```text
-<nativeLibraryDir>/libopencode.so
-<filesDir>/bin/opencode
-<filesDir>/opencode
+<nativeLibraryDir>/libopencode_runtime.so
+assets/runtime_support/
 ```
 
-这部分目前只是实验代码。仓库没有提供可直接打包进 APK 的 OpenCode 二进制。
+Runtime payload 不提交进 git。构建包含本地 runtime 的 APK 前，需要先运行 `android-app/runtime/tools/` 下的导入脚本；如果缺少二进制或必要 support assets，Gradle 会 fail-fast。
 
 ## 从源码构建
 

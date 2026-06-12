@@ -15,6 +15,7 @@ import java.net.URL
 import java.io.File
 import java.util.Base64
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import android.system.Os
 import android.system.OsConstants
 
@@ -48,6 +49,10 @@ class RuntimeProcessManager(private val context: Context) {
             if (resolved.usesSafBridge) {
                 SafBridgeSync.syncDown(context, resolved.treeUri!!, workspace)
             }
+            if (RuntimeSupport.needsInstall(context)) {
+                stopBlocking()
+            }
+            RuntimeSupport.ensureInstalled(context).getOrThrow()
             if (process?.isAlive == true && runningPort == port && runningWorkspace == workspace.absolutePath) {
                 if (tryAdoptHealthyRuntime(port, serverPassword, workspace, resolved)) {
                     return@runCatching
@@ -67,7 +72,6 @@ class RuntimeProcessManager(private val context: Context) {
             }
             killStaleRuntimeProcesses(OsConstants.SIGKILL)
 
-            RuntimeSupport.ensureInstalled(context).getOrThrow()
             RuntimeConfigWriter.write(context.filesDir, providerConfig).getOrThrow()
             val nativeLibraryDir = File(context.applicationInfo.nativeLibraryDir)
             val versionEnv = RuntimeLaunchEnv.build(
@@ -126,13 +130,29 @@ class RuntimeProcessManager(private val context: Context) {
         stopBlocking()
     }
 
+    fun stopBestEffortNow() {
+        flushSafBridgeBestEffortNow()
+        clearSafBridgeObserver()
+        stopProcessBlocking()
+    }
+
     fun flushSafBridgeNow() {
         flushSafBridgeSyncBlocking()
+    }
+
+    fun flushSafBridgeBestEffortNow() {
+        runBlockingStepWithTimeout("SAF workspace sync-up", 5_000) {
+            flushSafBridgeSyncBlocking()
+        }
     }
 
     private fun stopBlocking() {
         flushSafBridgeSyncBlocking()
         clearSafBridgeObserver()
+        stopProcessBlocking()
+    }
+
+    private fun stopProcessBlocking() {
         val proc = process
         val groupId = processGroupId
         process = null
@@ -345,6 +365,17 @@ class RuntimeProcessManager(private val context: Context) {
         val bridgeDir = activeBridgeDir ?: return
         runCatching { SafBridgeSync.syncUp(context, bridgeDir, treeUri) }
             .onFailure { Log.w("OpenCodeRuntime", "SAF workspace sync-up failed", it) }
+    }
+
+    private fun runBlockingStepWithTimeout(label: String, timeoutMillis: Long, block: () -> Unit) {
+        val worker = thread(start = true, isDaemon = true, name = "opencode-runtime-${label.replace(' ', '-')}") {
+            block()
+        }
+        worker.join(timeoutMillis)
+        if (worker.isAlive) {
+            Log.w("OpenCodeRuntime", "$label did not finish within ${timeoutMillis}ms")
+            worker.interrupt()
+        }
     }
 
     private fun clearSafBridgeObserver() {

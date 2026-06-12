@@ -42,7 +42,7 @@ data class ChatDisplayPart(
     val callID: String? = null,
     val state: ToolState? = null,
     val isFinalText: Boolean = false,
-    /** Original index in the server message `parts` list — drives render order. */
+    /** Original index in the server message `parts` list; the list order itself drives rendering. */
     val sourceOrder: Int = Int.MAX_VALUE,
 )
 
@@ -140,6 +140,38 @@ class ChatStateHolder(
         }
     }
 
+    fun onReasoningDeltaFlush(text: String) {
+        if (text.isBlank()) return
+        val assistantId = activeLocalAssistantId ?: return
+        updateMessage(assistantId) { msg ->
+            msg.copy(
+                phase = MessagePhase.Streaming,
+                visibleParts = msg.visibleParts.withStableReasoning(text),
+            )
+        }
+    }
+
+    fun shouldApplyAssistantTextSnapshot(
+        messageId: String?,
+        role: String?,
+        text: String,
+    ): Boolean {
+        return when (role?.lowercase()) {
+            "assistant" -> true
+            "user" -> false
+            else -> {
+                val activeAssistant = activeLocalAssistantId?.let(::findMessage)
+                val activeUser = activeLocalUserId?.let(::findMessage)
+                when {
+                    messageId != null && activeAssistant?.matchesServerMessage(messageId) == true -> true
+                    messageId != null && activeUser?.matchesServerMessage(messageId) == true -> false
+                    text == activeUserBubbleText || text == activeSendText -> false
+                    else -> true
+                }
+            }
+        }
+    }
+
     fun onCompleted() {
         val assistantId = activeLocalAssistantId ?: return
         updateMessage(assistantId) { msg ->
@@ -193,12 +225,7 @@ class ChatStateHolder(
         }
 
         var selectedModel: ModelRef? = null
-        val serverAssistant = serverMessages.lastOrNull {
-            it.info.role == "assistant" &&
-                it.info.id !in existingServerIds &&
-                it.info.id !in consumedServerMessageIds &&
-                it.hasVisibleContent()
-        }
+        val serverAssistant = findAssistantForActiveSlot(serverMessages, existingServerIds)
         if (serverAssistant != null && bindServerAssistant(serverAssistant)) {
             val info = serverAssistant.info
             if (info.providerID != null && info.modelID != null) {
@@ -269,11 +296,12 @@ class ChatStateHolder(
             val allParts = serverAssistant.parts.toAssistantDisplayParts()
             val deferredParts = allParts.filter { it.type in DEFERRED_PART_TYPES }
             val immediateParts = allParts.filter { it.type !in DEFERRED_PART_TYPES }
-            val visibleParts = if (immediateParts.any { it.type == "text" }) {
-                immediateParts
+            val baseParts = if (immediateParts.any { it.type == "reasoning" }) {
+                msg.visibleParts.filterNot { it.renderId == REASONING_PART_RENDER_ID }
             } else {
-                mergePartsByRenderId(msg.visibleParts, immediateParts)
+                msg.visibleParts
             }
+            val visibleParts = mergePartsByRenderId(baseParts, immediateParts)
 
             msg.copy(
                 serverId = serverAssistant.info.id,
@@ -295,6 +323,38 @@ class ChatStateHolder(
             messages[idx] = transform(messages[idx])
         }
     }
+
+    private fun findAssistantForActiveSlot(
+        serverMessages: List<Message>,
+        existingServerIds: Set<String>,
+    ): Message? {
+        val activeAssistant = activeLocalAssistantId?.let(::findMessage)
+        val activeServerId = activeAssistant?.serverId
+        if (activeAssistant != null) {
+            serverMessages.lastOrNull {
+                it.info.role == "assistant" &&
+                    it.hasVisibleContent() &&
+                    if (activeServerId != null) {
+                        it.info.id == activeServerId
+                    } else {
+                        it.info.id !in existingServerIds && it.info.id !in consumedServerMessageIds
+                    }
+            }?.let { return it }
+        }
+
+        return serverMessages.lastOrNull {
+            it.info.role == "assistant" &&
+                it.info.id !in existingServerIds &&
+                it.info.id !in consumedServerMessageIds &&
+                it.hasVisibleContent()
+        }
+    }
+
+    private fun findMessage(renderId: String): ChatDisplayMessage? =
+        messages.firstOrNull { it.renderId == renderId }
+
+    private fun ChatDisplayMessage.matchesServerMessage(messageId: String): Boolean =
+        serverId == messageId || renderId == messageId
 
     private fun removeInvisibleNonActiveMessages() {
         messages.removeAll { msg ->
@@ -374,6 +434,26 @@ class ChatStateHolder(
         return listOf(
             ChatDisplayPart(renderId = TEXT_PART_RENDER_ID, type = "text", text = text, sourceOrder = Int.MAX_VALUE),
         ) + this
+    }
+
+    private fun List<ChatDisplayPart>.withStableReasoning(text: String): List<ChatDisplayPart> {
+        val reasoningIndex = indexOfFirst { it.renderId == REASONING_PART_RENDER_ID }
+        if (reasoningIndex >= 0) {
+            val part = this[reasoningIndex]
+            if (part.text == text) return this
+            return mapIndexed { index, item ->
+                if (index == reasoningIndex) item.copy(text = text) else item
+            }
+        }
+        val reasoningPart = ChatDisplayPart(
+            renderId = REASONING_PART_RENDER_ID,
+            type = "reasoning",
+            text = text,
+            sourceOrder = Int.MAX_VALUE - 1,
+        )
+        val textIndex = indexOfFirst { it.renderId == TEXT_PART_RENDER_ID }
+        if (textIndex < 0) return listOf(reasoningPart) + this
+        return toMutableList().also { it.add(textIndex, reasoningPart) }
     }
 
     private fun List<MessagePart>.toDisplayParts(
@@ -458,6 +538,7 @@ class ChatStateHolder(
 
     private companion object {
         const val TEXT_PART_RENDER_ID = "text:0"
+        const val REASONING_PART_RENDER_ID = "reasoning:stream"
         const val FINAL_TEXT_RENDER_ID = "final-text"
         val VISIBLE_PART_TYPES = setOf("text", "reasoning", "file", "image", "tool", "tool-invocation", "tool-result")
         val DEFERRED_PART_TYPES = setOf("tool", "tool-invocation", "tool-result", "step-start", "step-finish")

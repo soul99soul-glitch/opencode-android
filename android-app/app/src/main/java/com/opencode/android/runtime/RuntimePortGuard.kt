@@ -31,13 +31,15 @@ internal object RuntimePortGuard {
 
     fun portToProcHex(port: Int): String {
         val value = port and 0xFFFF
-        val low = value and 0xFF
-        val high = (value shr 8) and 0xFF
-        return String.format(Locale.US, "%02X%02X", low, high)
+        return String.format(Locale.US, "%04X", value)
     }
 
     private fun readTcpSocketInode(localHostHex: String, localPortHex: String): String? = runCatching {
-        File("/proc/net/tcp").readLines().drop(1).firstNotNullOfOrNull { line ->
+        parseListeningInode(File("/proc/net/tcp").readLines().drop(1), localHostHex, localPortHex)
+    }.getOrNull()
+
+    internal fun parseListeningInode(lines: List<String>, localHostHex: String, localPortHex: String): String? {
+        return lines.firstNotNullOfOrNull { line ->
             val parts = line.trim().split(Regex("\\s+"))
             if (parts.size < 10) return@firstNotNullOfOrNull null
             val local = parts[1]
@@ -51,7 +53,7 @@ internal object RuntimePortGuard {
                 null
             }
         }
-    }.getOrNull()
+    }
 
     private fun findPidForSocketInode(inode: String): Int? {
         File("/proc").listFiles()?.forEach { entry ->

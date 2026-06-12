@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screen
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -56,6 +57,7 @@ import kotlinx.coroutines.launch
 
 import java.util.*
 
+@SuppressLint("LocalContextGetResourceValueCall")
 @Composable
 fun SessionsScreen(onSessionClick: (String, String?) -> Unit, onSettingsClick: () -> Unit) {
     val context = LocalContext.current

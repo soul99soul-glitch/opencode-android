@@ -170,6 +170,12 @@
     <string name="chat_loading_agents">加载 Agent 中…</string>
     <string name="chat_no_response">未收到响应，服务器可能处理失败</string>
     <string name="chat_unexpected_response">服务器返回异常</string>
+    <string name="chat_status_ready">就绪</string>
+    <string name="chat_status_complete">完成</string>
+    <string name="chat_status_thinking">思考中…</string>
+    <string name="chat_status_tool">工具中…</string>
+    <string name="chat_status_generating">生成中…</string>
+    <string name="chat_status_stalled">可能卡住</string>
 
     <!-- Command descriptions -->
     <string name="chat_cmd_review">代码审查</string>
@@ -182,6 +188,7 @@
     <string name="chat_thinking">思考中…</string>
     <string name="chat_thinking_collapsed">思考</string>
     <string name="chat_chars_count">%d 字符</string>
+    <string name="chat_no_final_text">未生成正文</string>
     <string name="chat_empty_prompt">想构建点什么？</string>
     <string name="chat_suggest_explain">解释这个代码库</string>
     <string name="chat_suggest_bugs">找找代码里的 Bug</string>
@@ -219,6 +226,7 @@
     <string name="local_provider_coding_base">Coding Base URL</string>
     <string name="local_provider_api_key">API Key</string>
     <string name="local_provider_model">模型</string>
+    <string name="local_provider_model_id">模型 ID</string>
     <string name="local_provider_fetching">拉取中…</string>
     <string name="local_provider_choose">选择…</string>
     <string name="local_provider_loading_models">加载模型中…</string>
@@ -241,6 +249,7 @@
     <string name="workspace_sessions_count">%d 个会话</string>
     <string name="workspace_current">当前</string>
     <string name="workspace_open">打开</string>
+    <string name="workspace_linked_folder">已链接文件夹</string>
 
     <!-- MCP field placeholders -->
     <string name="mcp_field_name">名称</string>

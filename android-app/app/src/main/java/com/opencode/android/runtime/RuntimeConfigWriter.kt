@@ -1,5 +1,6 @@
 package com.opencode.android.runtime
 
+import com.opencode.android.data.model.EndpointSecurityPolicy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -48,6 +49,9 @@ object RuntimeConfigWriter {
         val effectiveBaseUrl = config.activeBaseUrl.trim().ifBlank { config.baseUrl.trim() }
         require(effectiveBaseUrl.startsWith("http://") || effectiveBaseUrl.startsWith("https://")) {
             "Provider base URL must start with http:// or https://"
+        }
+        EndpointSecurityPolicy.publicCleartextBlockMessage(effectiveBaseUrl)?.let {
+            throw IllegalArgumentException(it)
         }
         require(config.modelIds.isNotEmpty()) { "At least one model is required" }
 

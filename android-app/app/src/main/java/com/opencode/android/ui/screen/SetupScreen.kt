@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screen
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -23,6 +24,8 @@ import com.opencode.android.data.api.fetchWorkspaceOptions
 import com.opencode.android.data.model.ConnectionMode
 import com.opencode.android.data.model.LocalProfile
 import com.opencode.android.data.model.ServerConfig
+import com.opencode.android.data.model.appLocalWorkspaceProfile
+import com.opencode.android.data.model.safLocalWorkspaceProfile
 import com.opencode.android.data.model.sanitizeLocalWorkspaceName
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.runtime.RuntimeCompanionClient
@@ -40,6 +43,7 @@ import com.opencode.android.ui.theme.OcType
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+@SuppressLint("LocalContextGetResourceValueCall")
 @Composable
 fun SetupScreen(onComplete: () -> Unit) {
     val context = LocalContext.current
@@ -60,7 +64,9 @@ fun SetupScreen(onComplete: () -> Unit) {
     var showWorkspacePicker by remember { mutableStateOf(false) }
     val pinnedWorkspaces by prefs.pinnedWorkspaces.collectAsState(initial = emptySet())
     val localProfile by prefs.localProfile.collectAsState(initial = LocalProfile())
-    val localWorkspaceNames by prefs.localWorkspaceNames.collectAsState(initial = listOf("default"))
+    val localWorkspaceProfiles by prefs.localWorkspaceProfiles.collectAsState(
+        initial = listOf(appLocalWorkspaceProfile("default", lastUsedAt = 0)),
+    )
     var localWorkspaceDraft by remember(localProfile.workspacePath) {
         mutableStateOf(sanitizeLocalWorkspaceName(localProfile.workspacePath))
     }
@@ -71,10 +77,16 @@ fun SetupScreen(onComplete: () -> Unit) {
         localWorkspaceDraft = sanitizeLocalWorkspaceName(selection.displayName)
         localTreeUriDraft = selection.treeUri
     }
-    val localWorkspaceCandidates = remember(localWorkspaceNames, localWorkspaceDraft) {
-        (localWorkspaceNames + sanitizeLocalWorkspaceName(localWorkspaceDraft))
-            .filter { it.isNotBlank() }
-            .distinct()
+    val currentLocalWorkspaceProfile = remember(localWorkspaceDraft, localTreeUriDraft) {
+        if (localTreeUriDraft.isBlank()) {
+            appLocalWorkspaceProfile(localWorkspaceDraft, lastUsedAt = 0)
+        } else {
+            safLocalWorkspaceProfile(localWorkspaceDraft, localTreeUriDraft, lastUsedAt = 0)
+        }
+    }
+    val localWorkspaceCandidates = remember(localWorkspaceProfiles, currentLocalWorkspaceProfile) {
+        (localWorkspaceProfiles + currentLocalWorkspaceProfile)
+            .distinctBy { it.id }
     }
     var showLocalWorkspacePicker by remember { mutableStateOf(false) }
 
@@ -273,17 +285,17 @@ fun SetupScreen(onComplete: () -> Unit) {
                 }
                 if (showLocalWorkspacePicker) {
                     LocalWorkspacePicker(
-                        names = localWorkspaceCandidates,
-                        selectedName = sanitizeLocalWorkspaceName(localWorkspaceDraft),
-                        onSelect = {
-                            localWorkspaceDraft = it
-                            localTreeUriDraft = ""
+                        profiles = localWorkspaceCandidates,
+                        selectedId = currentLocalWorkspaceProfile.id,
+                        onSelect = { profile ->
+                            localWorkspaceDraft = profile.name
+                            localTreeUriDraft = profile.treeUri
                             showLocalWorkspacePicker = false
                             scope.launch {
                                 prefs.saveLocalProfile(
                                     localProfile.copy(
-                                        workspacePath = it,
-                                        workspaceTreeUri = "",
+                                        workspacePath = profile.name,
+                                        workspaceTreeUri = profile.treeUri,
                                     ),
                                 )
                             }

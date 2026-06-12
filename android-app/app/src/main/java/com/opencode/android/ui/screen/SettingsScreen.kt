@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screen
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -18,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +47,8 @@ import com.opencode.android.data.model.parseModelIds
 import com.opencode.android.data.model.sanitizeLocalWorkspaceName
 import com.opencode.android.data.model.validate
 import com.opencode.android.data.model.Provider
+import com.opencode.android.data.model.appLocalWorkspaceProfile
+import com.opencode.android.data.model.safLocalWorkspaceProfile
 import com.opencode.android.data.repository.AppearanceRepository
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.runtime.LegacyRuntimeCompanion
@@ -70,9 +74,11 @@ import com.opencode.android.ui.theme.OcType
  *  末尾: DISCONNECT（红色）
  *  底部: opencode · host:port
  */
+@SuppressLint("LocalContextGetResourceValueCall")
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     val context = LocalContext.current
+    val locale = LocalLocale.current.platformLocale
     val prefs = remember { PreferencesRepository(context) }
     val appearance = remember { AppearanceRepository(context) }
     val c = LocalOcColors.current
@@ -111,7 +117,9 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         }
     }
     var localStatus by remember { mutableStateOf<String?>(null) }
-    val localWorkspaceNames by prefs.localWorkspaceNames.collectAsState(initial = listOf("default"))
+    val localWorkspaceProfiles by prefs.localWorkspaceProfiles.collectAsState(
+        initial = listOf(appLocalWorkspaceProfile("default", lastUsedAt = 0)),
+    )
     var localWorkspaceDraft by remember(localProfile.workspacePath) {
         mutableStateOf(sanitizeLocalWorkspaceName(localProfile.workspacePath))
     }
@@ -131,10 +139,16 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             localStatus = context.getString(R.string.status_linked_external_folder)
         }
     }
-    val localWorkspaceCandidates = remember(localWorkspaceNames, localWorkspaceDraft) {
-        (localWorkspaceNames + sanitizeLocalWorkspaceName(localWorkspaceDraft))
-            .filter { it.isNotBlank() }
-            .distinct()
+    val currentLocalWorkspaceProfile = remember(localWorkspaceDraft, localTreeUriDraft) {
+        if (localTreeUriDraft.isBlank()) {
+            appLocalWorkspaceProfile(localWorkspaceDraft, lastUsedAt = 0)
+        } else {
+            safLocalWorkspaceProfile(localWorkspaceDraft, localTreeUriDraft, lastUsedAt = 0)
+        }
+    }
+    val localWorkspaceCandidates = remember(localWorkspaceProfiles, currentLocalWorkspaceProfile) {
+        (localWorkspaceProfiles + currentLocalWorkspaceProfile)
+            .distinctBy { it.id }
     }
     var showLocalWorkspacePicker by remember { mutableStateOf(false) }
     var bundledPortDraft by remember(localProfile.bundledPort) { mutableStateOf(localProfile.bundledPort.toString()) }
@@ -189,7 +203,6 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
     var showProviderModelPicker by remember { mutableStateOf(false) }
     var isFetchingProviderModels by remember { mutableStateOf(false) }
     var fetchedProviderModels by remember { mutableStateOf<List<String>>(emptyList()) }
-    var lastProviderModelFetchKey by remember { mutableStateOf("") }
     val selectedProviderPreset = LocalProviderPresets.byId(providerPresetIdDraft) ?: initialProviderPreset
     val selectedProviderModel = parseModelIds(providerModelsDraft).firstOrNull().orEmpty()
     val providerModelCandidates = (fetchedProviderModels.ifEmpty { selectedProviderPreset.modelIds } + selectedProviderModel)
@@ -337,6 +350,10 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                     profile = nextProfile,
                     apiKey = providerApiKeyDraft.takeIf { it.isNotBlank() },
                 )
+                val selectedModelId = nextProfile.modelIds.firstOrNull()
+                if (nextProfile.enabled && !selectedModelId.isNullOrBlank()) {
+                    prefs.saveDefaultModel(LocalProviderDefaults.PROVIDER_ID, selectedModelId)
+                }
                 val restartApplied = if (mode == ConnectionMode.LOCAL_BUNDLED && bundledAvailable) {
                     runBundledServiceCommand(restart = true)
                 } else {
@@ -490,7 +507,6 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             providerHasSavedKey = saved.hasApiKey
             providerApiKeyDraft = ""
             fetchedProviderModels = emptyList()
-            lastProviderModelFetchKey = ""
             showProviderModelPicker = false
             providerStatus = null
             showProviderPresets = false
@@ -513,6 +529,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
             .onSuccess { result ->
                 fetchedProviderModels = result.models
                 providerActiveBaseUrlDraft = result.baseUrl
+                showProviderModelPicker = true
                 providerStatus = context.getString(R.string.status_fetched_models, result.models.size, result.sourceLabel)
             }
             .onFailure { providerStatus = context.getString(R.string.status_model_fetch_failed, it.message ?: "unknown") }
@@ -523,6 +540,11 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         scope.launch {
             fetchProviderModelsNow(auto = false)
         }
+    }
+
+    fun fetchProviderModelsAfterInput() {
+        if (providerApiKeyDraft.isBlank() && !providerHasSavedKey) return
+        if (providerEnabledDraft) fetchProviderModels()
     }
 
     fun selectProviderModel(modelId: String) {
@@ -566,29 +588,6 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                     mcpStatus = context.getString(R.string.status_imported_from_agent, result.importedMcpNames.joinToString(), result.importedPluginSpecs.joinToString())
                 }
             }
-    }
-
-    LaunchedEffect(
-        mode,
-        providerPresetIdDraft,
-        providerBaseUrlDraft,
-        providerCodingBaseUrlDraft,
-        providerApiKeyDraft,
-    ) {
-        if (mode != ConnectionMode.LOCAL_BUNDLED) return@LaunchedEffect
-        if (!providerEnabledDraft) return@LaunchedEffect
-        if (providerApiKeyDraft.trim().length < 8 && !providerHasSavedKey) return@LaunchedEffect
-        val key = listOf(
-            providerPresetIdDraft,
-            providerBaseUrlDraft.trim(),
-            providerCodingBaseUrlDraft.trim(),
-            providerApiKeyDraft.trim().takeIf { it.isNotBlank() }?.hashCode()?.toString()
-                ?: "saved-$providerHasSavedKey",
-        ).joinToString("|")
-        if (key == lastProviderModelFetchKey) return@LaunchedEffect
-        delay(800)
-        lastProviderModelFetchKey = key
-        fetchProviderModelsNow(auto = true)
     }
 
     Column(
@@ -753,17 +752,17 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                         Column(Modifier.fillMaxWidth()) {
                             Hairline()
                             LocalWorkspacePicker(
-                                names = localWorkspaceCandidates,
-                                selectedName = sanitizeLocalWorkspaceName(localWorkspaceDraft),
-                                onSelect = {
-                                    localWorkspaceDraft = it
-                                    localTreeUriDraft = ""
+                                profiles = localWorkspaceCandidates,
+                                selectedId = currentLocalWorkspaceProfile.id,
+                                onSelect = { profile ->
+                                    localWorkspaceDraft = profile.name
+                                    localTreeUriDraft = profile.treeUri
                                     showLocalWorkspacePicker = false
                                     scope.launch {
                                         prefs.saveLocalProfile(
                                             localProfile.copy(
-                                                workspacePath = it,
-                                                workspaceTreeUri = "",
+                                                workspacePath = profile.name,
+                                                workspaceTreeUri = profile.treeUri,
                                             ),
                                         )
                                     }
@@ -853,6 +852,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                 },
                 providerApiKeyDraft = providerApiKeyDraft,
                 onApiKeyChange = { providerApiKeyDraft = it },
+                onApiKeyEditingComplete = { fetchProviderModelsAfterInput() },
                 providerHasSavedKey = providerHasSavedKey,
                 onClearKey = { clearLocalProviderKey() },
                 selectedProviderModel = selectedProviderModel,
@@ -864,6 +864,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                     if (providerModelCandidates.isEmpty() && !isFetchingProviderModels) fetchProviderModels()
                 },
                 onFetchModels = { fetchProviderModels() },
+                onModelChange = { providerModelsDraft = it },
                 onSelectModel = { selectProviderModel(it) },
                 providerValidationMessage = providerValidationMessage,
                 providerStatus = providerStatus,
@@ -1048,7 +1049,7 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
                     val currentTag by appearance.languageTag.collectAsState(initial = "")
                     val effectiveTag = when {
                         currentTag.isNotEmpty() -> currentTag
-                        java.util.Locale.getDefault().language == "zh" -> "zh-CN"
+                        locale.language == "zh" -> "zh-CN"
                         else -> "en"
                     }
                     AppearanceRepository.LANGUAGE_OPTIONS.drop(1).forEach { (tag, label) ->
@@ -1150,5 +1151,3 @@ fun SettingsScreen(onBack: () -> Unit, onDisconnect: () -> Unit) {
         }
     }
 }
-
-

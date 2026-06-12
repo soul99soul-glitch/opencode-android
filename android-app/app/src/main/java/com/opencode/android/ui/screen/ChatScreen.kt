@@ -1,5 +1,6 @@
 package com.opencode.android.ui.screen
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
@@ -41,6 +42,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -77,6 +79,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.android.data.api.OpenCodeApi
+import com.opencode.android.data.api.PromptSendResult
 import com.opencode.android.data.model.*
 import com.opencode.android.data.repository.PreferencesRepository
 import com.opencode.android.runtime.RuntimeCompanionClient
@@ -91,6 +94,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import androidx.compose.ui.res.stringResource
@@ -120,6 +124,148 @@ private fun shortAgent(agent: String?): String = when (agent) {
     else          -> agent.take(5)
 }
 
+private enum class AgentActivityStatus {
+    Ready,
+    Thinking,
+    Tool,
+    Generating,
+    Stalled,
+    Complete,
+}
+
+internal fun resolveModelForSend(
+    selectedModel: ModelRef?,
+    providers: List<Provider>,
+    endpointMode: ConnectionMode,
+    localProviderProfile: LocalProviderProfile? = null,
+): ModelRef? {
+    fun isAvailable(model: ModelRef?): Boolean {
+        if (model == null) return false
+        return providers.any { provider ->
+            provider.id == model.providerID && provider.models.containsKey(model.modelID)
+        }
+    }
+
+    selectedModel?.takeIf(::isAvailable)?.let { return it }
+
+    if (endpointMode != ConnectionMode.LOCAL_BUNDLED) return null
+
+    val profile = localProviderProfile?.takeIf { it.enabled } ?: return null
+    return profile.modelIds
+        .asSequence()
+        .map { ModelRef(LocalProviderDefaults.PROVIDER_ID, it) }
+        .firstOrNull(::isAvailable)
+}
+
+internal fun hasDanglingEmptyAssistant(messages: List<Message>): Boolean =
+    messages.any { it.info.role == "assistant" && it.parts.isEmpty() }
+
+internal fun JsonObject.stringField(name: String): String? =
+    runCatching { get(name)?.jsonPrimitive?.content }.getOrNull()
+
+internal fun JsonObject.objectField(name: String): JsonObject? =
+    runCatching { get(name)?.jsonObject }.getOrNull()
+
+internal fun JsonObject.eventSessionId(): String? =
+    stringField("sessionID")
+        ?: stringField("sessionId")
+        ?: objectField("part")?.stringField("sessionID")
+        ?: objectField("part")?.stringField("sessionId")
+        ?: objectField("message")?.stringField("sessionID")
+        ?: objectField("message")?.stringField("sessionId")
+
+internal fun JsonObject.eventMessageRole(): String? =
+    stringField("role")
+        ?: objectField("message")?.stringField("role")
+        ?: objectField("info")?.stringField("role")
+        ?: objectField("message")?.objectField("info")?.stringField("role")
+
+internal fun JsonObject.eventMessageId(): String? =
+    stringField("messageID")
+        ?: stringField("messageId")
+        ?: stringField("message_id")
+        ?: objectField("part")?.stringField("messageID")
+        ?: objectField("part")?.stringField("messageId")
+        ?: objectField("part")?.stringField("message_id")
+        ?: objectField("message")?.stringField("id")
+        ?: objectField("message")?.objectField("info")?.stringField("id")
+
+internal fun JsonObject.deltaPartType(): String? {
+    val part = objectField("part")
+    val partType = part?.stringField("type")
+        ?: stringField("partType")
+        ?: stringField("part_type")
+        ?: stringField("type")
+    if (partType != null) return partType
+
+    val partId = stringField("partID")
+        ?: stringField("partId")
+        ?: stringField("part_id")
+        ?: part?.stringField("id")
+    return when {
+        partId?.startsWith("text", ignoreCase = true) == true -> "text"
+        partId?.startsWith("reasoning", ignoreCase = true) == true -> "reasoning"
+        partId?.startsWith("thinking", ignoreCase = true) == true -> "reasoning"
+        else -> null
+    }
+}
+
+internal data class StreamPartSnapshot(
+    val type: String,
+    val text: String,
+    val messageId: String? = null,
+)
+
+internal fun JsonObject.streamPartSnapshot(): StreamPartSnapshot? {
+    val part = objectField("part") ?: this
+    val type = part.stringField("type")
+        ?: stringField("partType")
+        ?: stringField("part_type")
+        ?: deltaPartType()
+        ?: return null
+    val text = part.stringField("text")
+        ?: stringField("text")
+        ?: return null
+    return StreamPartSnapshot(type = type, text = text, messageId = eventMessageId())
+}
+
+@Composable
+private fun AgentActivityIndicator(status: AgentActivityStatus, modifier: Modifier = Modifier) {
+    val c = LocalOcColors.current
+    val active = status == AgentActivityStatus.Thinking ||
+        status == AgentActivityStatus.Tool ||
+        status == AgentActivityStatus.Generating
+    val label = stringResource(
+        when (status) {
+            AgentActivityStatus.Ready -> R.string.chat_status_ready
+            AgentActivityStatus.Thinking -> R.string.chat_status_thinking
+            AgentActivityStatus.Tool -> R.string.chat_status_tool
+            AgentActivityStatus.Generating -> R.string.chat_status_generating
+            AgentActivityStatus.Stalled -> R.string.chat_status_stalled
+            AgentActivityStatus.Complete -> R.string.chat_status_complete
+        },
+    )
+
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        OnlineDot(active = active)
+        Text(
+            label,
+            style = OcType.mono.copy(fontSize = 11.sp),
+            color = when (status) {
+                AgentActivityStatus.Stalled -> c.ink2
+                AgentActivityStatus.Complete, AgentActivityStatus.Ready -> c.ink4
+                else -> c.accent
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
 private val StandardPrimaryAgents = listOf("build", "plan", "orchestrator")
 
 private fun primaryAgentRank(agent: AgentInfo): Int {
@@ -128,6 +274,7 @@ private fun primaryAgentRank(agent: AgentInfo): Int {
 }
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@SuppressLint("LocalContextGetResourceValueCall")
 @Composable
 fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onSubagentNavigate: (sessionId: String) -> Unit = {}) {
     val context = LocalContext.current
@@ -146,7 +293,9 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val rawText = inputText.text
     val sseBuffer = remember(sessionId) { StringBuilder() }
+    val reasoningSseBuffer = remember(sessionId) { StringBuilder() }
     val flushedSseText = remember(sessionId) { StringBuilder() }
+    val flushedReasoningSseText = remember(sessionId) { StringBuilder() }
     val reversedMessages by remember { derivedStateOf { messages.asReversed() } }
     var selectedAgent by remember { mutableStateOf<String?>(null) }
     var availableAgents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
@@ -163,6 +312,54 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
     var expandedProviderId by remember { mutableStateOf<String?>(null) }
     var selectedModel by remember { mutableStateOf<ModelRef?>(null) }
     val listState = rememberLazyListState()
+    var lastAgentActivityAt by remember(sessionId) { mutableLongStateOf(System.currentTimeMillis()) }
+    var statusClock by remember(sessionId) { mutableLongStateOf(System.currentTimeMillis()) }
+
+    fun markAgentActivity(now: Long = System.currentTimeMillis()) {
+        lastAgentActivityAt = now
+        statusClock = now
+    }
+
+    LaunchedEffect(sessionId, isSending) {
+        while (isSending) {
+            delay(1_000)
+            statusClock = System.currentTimeMillis()
+        }
+    }
+
+    val agentActivityStatus by remember {
+        derivedStateOf {
+            val latestAssistant = messages.lastOrNull { it.role == "assistant" }
+            val parts = latestAssistant?.let { it.visibleParts + it.deferredParts }.orEmpty()
+            val hasAssistantOutput = latestAssistant?.visibleParts?.any { part ->
+                when (part.type) {
+                    "text", "reasoning" -> !part.text.isNullOrBlank()
+                    "tool", "tool-invocation", "tool-result" -> true
+                    else -> false
+                }
+            } == true
+            if (!isSending) {
+                if (hasAssistantOutput) AgentActivityStatus.Complete else AgentActivityStatus.Ready
+            } else if (statusClock - lastAgentActivityAt > 12_000) {
+                AgentActivityStatus.Stalled
+            } else {
+                val completeToolStates = setOf("completed", "done", "failed", "error", "cancelled", "canceled")
+                val hasRunningTool = parts.any { part ->
+                    if (part.type != "tool" && part.type != "tool-invocation") return@any false
+                    val state = part.state?.status?.lowercase()
+                    state == null || state !in completeToolStates
+                }
+                val hasReasoning = parts.any { it.type == "reasoning" && !it.text.isNullOrBlank() }
+                val hasText = parts.any { it.type == "text" && !it.text.isNullOrBlank() }
+                when {
+                    hasRunningTool -> AgentActivityStatus.Tool
+                    hasText || flushedSseText.isNotBlank() -> AgentActivityStatus.Generating
+                    hasReasoning || flushedReasoningSseText.isNotBlank() -> AgentActivityStatus.Thinking
+                    else -> AgentActivityStatus.Thinking
+                }
+            }
+        }
+    }
 
     // Parse @agent or /command prefix from input
     val parsedInput = remember(rawText) {
@@ -209,15 +406,35 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
 
     fun resetStreamBuffers() {
         sseBuffer.clear()
+        reasoningSseBuffer.clear()
         flushedSseText.clear()
+        flushedReasoningSseText.clear()
     }
 
     fun markSseTextFlushed(text: String) {
         flushedSseText.clear()
         flushedSseText.append(text)
+        markAgentActivity()
+    }
+
+    fun markSseReasoningFlushed(text: String) {
+        flushedReasoningSseText.clear()
+        flushedReasoningSseText.append(text)
+        markAgentActivity()
     }
 
     fun Message.firstText(): String? = parts.firstOrNull { it.type == "text" }?.text
+    fun Message.hasStructuredParts(): Boolean = parts.any { it.type != "text" }
+    fun Message.streamFallbackSignature(): String =
+        parts.joinToString("|") { part ->
+            listOf(
+                part.type,
+                part.id.orEmpty(),
+                part.text.orEmpty().length.toString(),
+                part.state?.status.orEmpty(),
+                part.state?.output.orEmpty().length.toString(),
+            ).joinToString(":")
+        }
 
     fun Throwable?.isLocalRuntimeConnectFailure(): Boolean {
         val msg = this?.message.orEmpty()
@@ -243,11 +460,39 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
         ).isSuccess
     }
 
+    suspend fun modelForSend(endpoint: ActiveEndpoint): ModelRef? {
+        val localProviderProfile = if (endpoint.mode == ConnectionMode.LOCAL_BUNDLED) {
+            prefs.localProviderProfile.first()
+        } else {
+            null
+        }
+        return resolveModelForSend(
+            selectedModel = selectedModel,
+            providers = providers,
+            endpointMode = endpoint.mode,
+            localProviderProfile = localProviderProfile,
+        ).also { selectedModel = it }
+    }
+
+    suspend fun reconcileSelectedModel(endpoint: ActiveEndpoint) {
+        selectedModel = resolveModelForSend(
+            selectedModel = selectedModel,
+            providers = providers,
+            endpointMode = endpoint.mode,
+            localProviderProfile = if (endpoint.mode == ConnectionMode.LOCAL_BUNDLED) {
+                prefs.localProviderProfile.first()
+            } else {
+                null
+            },
+        )
+    }
+
     suspend fun syncServerMessagesAfterIdle() {
         delay(800)
         val api = OpenCodeApi(prefs.activeEndpoint.first())
         try {
             api.getMessages(sessionId).onSuccess { serverMsgs ->
+                markAgentActivity()
                 chatState.onServerMessages(serverMsgs).selectedModel?.let { selectedModel = it }
             }
         } finally {
@@ -281,6 +526,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
             if (buf.isNotEmpty() && buf != flushedSseText.toString()) {
                 markSseTextFlushed(buf)
                 chatState.onStreamDeltaFlush(buf)
+                if (listState.firstVisibleItemIndex == 0 && listState.layoutInfo.totalItemsCount > 0) {
+                    listState.scrollToItem(0)
+                }
+            }
+            val reasoningBuf = reasoningSseBuffer.toString()
+            if (reasoningBuf.isNotEmpty() && reasoningBuf != flushedReasoningSseText.toString()) {
+                markSseReasoningFlushed(reasoningBuf)
+                chatState.onReasoningDeltaFlush(reasoningBuf)
                 if (listState.firstVisibleItemIndex == 0 && listState.layoutInfo.totalItemsCount > 0) {
                     listState.scrollToItem(0)
                 }
@@ -352,6 +605,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                     selectedModel = ModelRef(defProvider, defModel)
                 }
             }
+            reconcileSelectedModel(endpoint)
             // Fetch available agents (primary, non-hidden only)
             api.fetchAgents()
                 .onSuccess { allAgents ->
@@ -410,18 +664,49 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                 val type = obj["type"]?.jsonPrimitive?.content ?: ""
                 val props = obj["properties"]?.jsonObject
                 // Filter: SSE /event is global — strictly match this session
-                val evtSid = props?.get("sessionID")?.jsonPrimitive?.content ?: ""
+                val evtSid = props?.eventSessionId().orEmpty()
                 if (evtSid.isBlank() || evtSid != sessionId) return@collect
                 when (type) {
                     "message.part.delta" -> {
-                        sseBuffer.append(props?.get("delta")?.jsonPrimitive?.content ?: "")
+                        markAgentActivity()
+                        when (props?.deltaPartType()) {
+                            "text" -> sseBuffer.append(props.get("delta")?.jsonPrimitive?.content ?: "")
+                            "reasoning" -> reasoningSseBuffer.append(props.get("delta")?.jsonPrimitive?.content ?: "")
+                        }
+                    }
+                    "message.part.updated" -> {
+                        markAgentActivity()
+                        val eventProps = props ?: return@collect
+                        val snapshot = eventProps.streamPartSnapshot() ?: return@collect
+                        when (snapshot.type) {
+                            "text" -> {
+                                if (!chatState.shouldApplyAssistantTextSnapshot(
+                                        messageId = snapshot.messageId,
+                                        role = eventProps.eventMessageRole(),
+                                        text = snapshot.text,
+                                    )
+                                ) {
+                                    return@collect
+                                }
+                                sseBuffer.clear()
+                                sseBuffer.append(snapshot.text)
+                            }
+                            "reasoning" -> {
+                                reasoningSseBuffer.clear()
+                                reasoningSseBuffer.append(snapshot.text)
+                            }
+                        }
                     }
                     "session.status" -> {
                         val status = props?.get("status")?.jsonObject?.get("type")?.jsonPrimitive?.content
+                        markAgentActivity()
                         if (status == "idle" || status == "completed") {
                             isSending = false
                             if (sseBuffer.isNotEmpty()) {
                                 chatState.onStreamDeltaFlush(sseBuffer.toString())
+                            }
+                            if (reasoningSseBuffer.isNotEmpty()) {
+                                chatState.onReasoningDeltaFlush(reasoningSseBuffer.toString())
                             }
                             chatState.onCompleted()
                             scope.launch { syncServerMessagesAfterIdle() }
@@ -448,12 +733,14 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                     result.onSuccess { serverMsgs ->
                         val latestAssistant = serverMsgs.lastOrNull { it.info.role == "assistant" }
                         val sig = serverMsgs.joinToString("|") { it.info.id } + "_" +
-                            (latestAssistant?.parts?.size ?: 0) + "_" +
-                            latestAssistant?.firstText().orEmpty().length
+                            latestAssistant?.streamFallbackSignature().orEmpty()
                         if (sig != lastServerIds) {
                             lastServerIds = sig
                             lastChangeAt = System.currentTimeMillis()
-                            if (flushedSseText.isEmpty()) {
+                            markAgentActivity(lastChangeAt)
+                            if (latestAssistant?.hasStructuredParts() == true) {
+                                chatState.onServerMessages(serverMsgs).selectedModel?.let { selectedModel = it }
+                            } else if (flushedSseText.isEmpty()) {
                                 latestAssistant?.firstText()?.takeIf { it.isNotBlank() }?.let { text ->
                                     markSseTextFlushed(text)
                                     chatState.onStreamDeltaFlush(text)
@@ -540,19 +827,23 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    // Model info
+                    // Model + live agent activity.
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (selectedModel != null || messages.firstOrNull()?.modelID != null) {
+                        val modelLabel = selectedModel?.modelID
+                            ?: messages.firstOrNull()?.modelID
+                            ?: ""
+                        if (modelLabel.isNotBlank()) {
                             Box(
-                                Modifier.pressable {
-                                    if (providers.isNotEmpty()) showModelPicker = !showModelPicker
-                                }
+                                Modifier
+                                    .widthIn(max = 150.dp)
+                                    .pressable {
+                                        if (providers.isNotEmpty()) showModelPicker = !showModelPicker
+                                    }
                             ) {
-                                val modelLabel = selectedModel?.modelID
-                                    ?: messages.firstOrNull()?.modelID
-                                    ?: ""
                                 Text(
                                     modelLabel,
                                     style = OcType.mono.copy(fontSize = 11.sp),
@@ -562,6 +853,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 )
                             }
                         }
+                        AgentActivityIndicator(agentActivityStatus)
                     }
                 }
                 // Agent toggle pill — click to cycle through available agents
@@ -1151,6 +1443,7 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                 if (bubbleText.isBlank()) return@pressable
                                 inputText = TextFieldValue("")
                                 isSending = true
+                                markAgentActivity()
                                 resetStreamBuffers()
                                 // Build parts: text + attachments
                                 val parts = mutableListOf<PromptPart>()
@@ -1175,10 +1468,23 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     userParts = msgParts,
                                 )
                                 scope.launch {
-                                    suspend fun sendOnce(): Result<Message> {
-                                        val api = OpenCodeApi(prefs.activeEndpoint.first())
+                                    suspend fun sendOnce(): Result<PromptSendResult> {
+                                        val endpoint = prefs.activeEndpoint.first()
+                                        val api = OpenCodeApi(endpoint)
                                         return try {
-                                            api.sendPrompt(sessionId, parts, agent = sendAgent, model = selectedModel)
+                                            if (endpoint.mode == ConnectionMode.LOCAL_BUNDLED) {
+                                                api.getMessages(sessionId)
+                                                    .getOrNull()
+                                                    ?.takeIf(::hasDanglingEmptyAssistant)
+                                                    ?.let { api.abort(sessionId) }
+                                            }
+                                            api.sendPrompt(
+                                                sessionId = sessionId,
+                                                parts = parts,
+                                                agent = sendAgent,
+                                                model = modelForSend(endpoint),
+                                                allowAsyncLocalClose = endpoint.mode == ConnectionMode.LOCAL_BUNDLED,
+                                            )
                                         } finally {
                                             api.close()
                                         }
@@ -1190,23 +1496,26 @@ fun ChatScreen(sessionId: String, sessionTitle: String?, onBack: () -> Unit, onS
                                     }
 
                                     result
-                                        .onSuccess { msg ->
-                                            // Update selected model from response
-                                            msg.info.let { info ->
-                                                if (info.providerID != null && info.modelID != null) {
-                                                    selectedModel = ModelRef(info.providerID, info.modelID)
-                                                }
-                                            }
-                                            // Refresh title if still placeholder
-                                            if (displayTitle == context.getString(R.string.chat_new_session)) {
-                                                val api = OpenCodeApi(prefs.activeEndpoint.first())
-                                                try {
-                                                    api.getSession(sessionId).onSuccess { s ->
-                                                        val t = s.title.substringBefore(" - ").ifBlank { s.slug }
-                                                        if (t.isNotBlank() && t != "new session") displayTitle = t
+                                        .onSuccess { sendResult ->
+                                            if (sendResult is PromptSendResult.Completed) {
+                                                val msg = sendResult.message
+                                                // Update selected model from response
+                                                msg.info.let { info ->
+                                                    if (info.providerID != null && info.modelID != null) {
+                                                        selectedModel = ModelRef(info.providerID, info.modelID)
                                                     }
-                                                } finally {
-                                                    api.close()
+                                                }
+                                                // Refresh title if still placeholder
+                                                if (displayTitle == context.getString(R.string.chat_new_session)) {
+                                                    val api = OpenCodeApi(prefs.activeEndpoint.first())
+                                                    try {
+                                                        api.getSession(sessionId).onSuccess { s ->
+                                                            val t = s.title.substringBefore(" - ").ifBlank { s.slug }
+                                                            if (t.isNotBlank() && t != "new session") displayTitle = t
+                                                        }
+                                                    } finally {
+                                                        api.close()
+                                                    }
                                                 }
                                             }
                                         }

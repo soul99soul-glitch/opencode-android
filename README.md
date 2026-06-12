@@ -7,7 +7,7 @@ A native Android client for [OpenCode](https://opencode.ai), built with Jetpack 
 The app connects to a running OpenCode server so you can browse sessions, send messages, and follow streamed responses from a phone or tablet. It is a mobile interface for OpenCode, not a general-purpose chat app.
 
 > [!IMPORTANT]
-> This project is still early. There is no stable release, and the APK does not include a working OpenCode binary. The simplest setup is to run `opencode serve` on a computer or in Termux, then connect the app to it.
+> This project is still early. LAN mode remains the safest path: run `opencode serve` on a computer or in Termux, then connect the app to it. Bundled Local mode is experimental and requires importing the runtime payload before building.
 
 This is an independent project and is not affiliated with the OpenCode maintainers.
 
@@ -25,25 +25,25 @@ This is an independent project and is not affiliated with the OpenCode maintaine
 - Display tool calls and links to child sessions
 - Save connection, appearance, agent, and model preferences
 - Switch between light and dark themes and choose an accent color
+- Experimental Bundled Local mode: the main app can package an arm64 OpenCode runtime and host it through `OpenCodeService`
 
 ## What is not ready
 
-- Shipping an OpenCode runtime inside the APK
-- Starting and managing a local OpenCode server entirely from the app
+- Bundled Local mode outside arm64 test devices
+- Production-grade background survival for the local runtime on aggressive OEM Android builds
 - A dependable Termux handoff flow
 - Reliable SSE reconnection across network changes and Android background limits
 - Signed releases and automatic updates
 - Broad automated test coverage
 
-`OpenCodeService` and `ProcessManager` already try to find an executable in these locations:
+Current local runtime architecture is Option C: the main app packages the native runtime and support assets, extracts the executable to `nativeLibraryDir`, and starts it from `OpenCodeService`.
 
 ```text
-<nativeLibraryDir>/libopencode.so
-<filesDir>/bin/opencode
-<filesDir>/opencode
+<nativeLibraryDir>/libopencode_runtime.so
+assets/runtime_support/
 ```
 
-That code is experimental. This repository does not contain an OpenCode binary that can be bundled directly into the APK.
+Runtime payloads are intentionally not committed to git. Before building a local-runtime APK, import them with the scripts under `android-app/runtime/tools/`; the Gradle build fails fast if the binary or required support assets are missing.
 
 ## Build from source
 

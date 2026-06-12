@@ -14,16 +14,23 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -387,9 +394,11 @@ internal fun ProviderApiKeyRow(
     hasSavedKey: Boolean,
     value: String,
     onValueChange: (String) -> Unit,
+    onEditingComplete: () -> Unit,
     onClear: () -> Unit,
 ) {
     val c = LocalOcColors.current
+    var wasFocused by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -408,9 +417,16 @@ internal fun ProviderApiKeyRow(
             onValueChange = onValueChange,
             singleLine = true,
             cursorBrush = SolidColor(c.accent),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onEditingComplete() }),
             visualTransformation = PasswordVisualTransformation(),
             textStyle = OcType.mono.copy(color = c.ink2, textAlign = TextAlign.End),
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .onFocusChanged { state ->
+                    if (wasFocused && !state.isFocused) onEditingComplete()
+                    wasFocused = state.isFocused
+                },
             decorationBox = { inner ->
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                     if (value.isBlank()) {

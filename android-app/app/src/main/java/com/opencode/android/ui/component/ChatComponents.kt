@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.opencode.android.ui.screen.chat.ChatDisplayMessage
+import com.opencode.android.ui.screen.chat.ChatDisplayPart
 import com.opencode.android.ui.screen.chat.MessagePhase
 import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcUserBubbleShape
@@ -58,8 +59,11 @@ fun MessageBubble(
     val hasVisiblePartContent = message.visibleParts.any { part ->
         partHasVisibleContent(part.type, part.text)
     }
+    val hasDeferredPartContent = !isUser && message.deferredParts.any { part ->
+        partHasVisibleContent(part.type, part.text)
+    }
     val hasActiveStreamingSlot = !isUser && message.phase == MessagePhase.Streaming
-    if (!hasVisiblePartContent && !hasActiveStreamingSlot) return
+    if (!hasVisiblePartContent && !hasDeferredPartContent && !hasActiveStreamingSlot) return
 
     Column(
         Modifier.fillMaxWidth(),
@@ -162,9 +166,13 @@ fun MessageBubble(
                 }
                 Spacer(Modifier.height(8.dp))
 
+                val renderedPartIds = mutableSetOf<String>()
+                val hasTextOutput = message.visibleParts.any { it.type == "text" && !it.text.isNullOrBlank() }
+                val hasReasoningOutput = message.visibleParts.any { it.type == "reasoning" && !it.text.isNullOrBlank() }
+                val isActivelyGenerating = message.phase == MessagePhase.Streaming || message.phase == MessagePhase.Settling
                 var textIndex = 0
-                val orderedParts = message.visibleParts.sortedBy { it.sourceOrder }
-                orderedParts.forEach { part ->
+                message.visibleParts.forEach { part ->
+                    renderedPartIds += part.renderId
                     when (part.type) {
                         "text" -> {
                             val currentTextIndex = textIndex++
@@ -191,65 +199,99 @@ fun MessageBubble(
                                 Spacer(Modifier.height(6.dp))
                             }
                         }
-                        "tool" -> {
-                            val toolName = part.tool ?: "tool"
-                            val inputObj = part.state?.input
-                            val subagentType = inputObj?.get("subagent_type")?.toString()?.trim('"')
-                            // Metadata.sessionId = actual subtask session ID
-                            // Top-level part.sessionID = parent session ID
-                            val subSid = part.state?.metadata?.get("sessionId")?.toString()?.trim('"')
-                                ?: part.sessionID
-
-                            // Task/subtask tool → capsule (with agent name if available)
-                            if (toolName == "task" || toolName == "subtask") {
-                                val agentLabel = subagentType ?: toolName
-                                SubagentCapsule(
-                                    agent = agentLabel,
-                                    status = part.state?.status ?: "",
-                                    onClick = if (onSubagentClick != null)
-                                        {{ onSubagentClick(subSid ?: "", agentLabel) }}
-                                    else null,
-                                )
-                                Spacer(Modifier.height(3.dp))
-                            } else {
-                                val arg = inputObj?.entries?.firstOrNull()?.value?.toString()?.trim('"')?.take(60)
-                                    ?: ""
-                                val status = part.state?.status ?: ""
-                                val inputDetail = inputObj?.entries?.joinToString("\n") { (k, v) ->
-                                    "$k: ${v.toString().trim('"')}"
-                                }
-                                ToolCallRow(
-                                    tool = toolName,
-                                    arg = arg,
-                                    status = if (status == "completed") "done" else status,
-                                    output = part.state?.output,
-                                    input = inputDetail,
-                                )
-                                Spacer(Modifier.height(3.dp))
-                            }
-                        }
-                        "tool-invocation" -> ToolCallRow(
-                            tool = part.type,
-                            arg = part.text ?: "",
-                            status = "run",
-                        )
-                        "tool-result" -> ToolCallRow(
-                            tool = part.type,
-                            arg = part.text ?: "",
-                            status = "done",
-                        )
+                        "tool", "tool-invocation", "tool-result" -> AssistantToolPart(part, onSubagentClick)
                         "step-start" -> { /* skip */ }
                         "step-finish" -> { /* skip */ }
                         "reasoning" -> {
                             val text = part.text ?: ""
                             if (text.isNotBlank()) {
-                                ThinkingBlock(text = text, chars = text.length)
+                                ThinkingBlock(
+                                    text = text,
+                                    chars = text.length,
+                                    defaultExpanded = isActivelyGenerating,
+                                )
                             }
                         }
                     }
                 }
+                if (!isActivelyGenerating && !hasTextOutput && hasReasoningOutput) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.chat_no_final_text),
+                        style = OcType.mono,
+                        color = c.ink4,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+                if (isActivelyGenerating) {
+                    message.deferredParts
+                        .filter { it.renderId !in renderedPartIds }
+                        .filter { it.type == "tool" || it.type == "tool-invocation" || it.type == "tool-result" }
+                        .forEach { part -> AssistantToolPart(part, onSubagentClick) }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun AssistantToolPart(
+    part: ChatDisplayPart,
+    onSubagentClick: ((sessionId: String, agentName: String) -> Unit)?,
+) {
+    when (part.type) {
+        "tool" -> {
+            val toolName = part.tool ?: "tool"
+            val inputObj = part.state?.input
+            val subagentType = inputObj?.get("subagent_type")?.toString()?.trim('"')
+            // Metadata.sessionId = actual subtask session ID
+            // Top-level part.sessionID = parent session ID
+            val subSid = part.state?.metadata?.get("sessionId")?.toString()?.trim('"')
+                ?: part.sessionID
+
+            if (toolName == "task" || toolName == "subtask") {
+                val agentLabel = subagentType ?: toolName
+                SubagentCapsule(
+                    agent = agentLabel,
+                    status = normalizedToolStatus(part.state?.status),
+                    onClick = if (onSubagentClick != null)
+                        {{ onSubagentClick(subSid ?: "", agentLabel) }}
+                    else null,
+                )
+            } else {
+                val arg = inputObj?.entries?.firstOrNull()?.value?.toString()?.trim('"')?.take(60)
+                    ?: ""
+                val inputDetail = inputObj?.entries?.joinToString("\n") { (k, v) ->
+                    "$k: ${v.toString().trim('"')}"
+                }
+                ToolCallRow(
+                    tool = toolName,
+                    arg = arg,
+                    status = normalizedToolStatus(part.state?.status),
+                    output = part.state?.output,
+                    input = inputDetail,
+                )
+            }
+        }
+        "tool-invocation" -> ToolCallRow(
+            tool = part.type,
+            arg = part.text ?: "",
+            status = "run",
+        )
+        "tool-result" -> ToolCallRow(
+            tool = part.type,
+            arg = part.text ?: "",
+            status = "done",
+        )
+    }
+    Spacer(Modifier.height(3.dp))
+}
+
+private fun normalizedToolStatus(status: String?): String {
+    return when (status?.lowercase()) {
+        "completed", "done", "success", "succeeded" -> "done"
+        "running", "run", "queued", "pending", "started", "in_progress" -> "run"
+        else -> status?.ifBlank { null } ?: "run"
     }
 }
 
@@ -380,7 +422,7 @@ private fun toShortAgent(agent: String): String = when (agent) {
 private fun SubagentCapsule(agent: String, status: String, onClick: (() -> Unit)?) {
     val c = LocalOcColors.current
     val short = toShortAgent(agent)
-    val isRunning = status == "running" || status == "queued"
+    val isRunning = status == "run" || status == "running" || status == "queued"
 
     Row(
         Modifier

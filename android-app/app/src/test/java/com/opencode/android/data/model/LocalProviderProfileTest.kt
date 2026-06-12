@@ -86,8 +86,10 @@ class LocalProviderProfileTest {
 
         assertEquals("https://api.openai.com/v1", presets["openai"]!!.apiBaseUrl)
         assertEquals("https://chatgpt.com/backend-api/codex", presets["openai"]!!.codingBaseUrl)
+        assertEquals(emptyList<String>(), presets["openai"]!!.modelIds)
         assertEquals("https://generativelanguage.googleapis.com/v1beta", presets["gemini"]!!.apiBaseUrl)
         assertEquals("https://cloudcode-pa.googleapis.com", presets["gemini"]!!.codingBaseUrl)
+        assertEquals(emptyList<String>(), presets["gemini"]!!.modelIds)
         assertEquals("https://api.deepseek.com/v1", presets["deepseek"]!!.apiBaseUrl)
         assertEquals("https://openrouter.ai/api/v1", presets["openrouter"]!!.apiBaseUrl)
         assertEquals("https://api.moonshot.cn/v1", presets["kimi"]!!.apiBaseUrl)
@@ -164,5 +166,16 @@ class LocalProviderProfileTest {
         assertEquals("default", sanitizeLocalWorkspaceName("///"))
         assertEquals("my-workspace", sanitizeLocalWorkspaceName("/Users/me/my workspace"))
         assertEquals(64, sanitizeLocalWorkspaceName("a".repeat(100)).length)
+    }
+
+    @Test
+    fun localWorkspaceProfilesKeepSafUriDistinctFromAppName() {
+        val app = appLocalWorkspaceProfile("repo")
+        val saf = safLocalWorkspaceProfile("repo", "content://tree/repo")
+
+        assertEquals("app:repo", app.id)
+        assertEquals("", app.treeUri)
+        assertEquals("saf:content://tree/repo", saf.id)
+        assertEquals("content://tree/repo", saf.treeUri)
     }
 }

@@ -41,12 +41,17 @@ import androidx.compose.ui.res.stringResource
 import com.opencode.android.R
 
 /* =============================================================================
- * Thinking 折叠块 —— 默认收起;点三角旋转 90°,内容淡入上浮,左侧带竖线。
+ * Thinking block — shows OpenCode-provided reasoning content.
  * ========================================================================== */
 @Composable
-fun ThinkingBlock(text: String, chars: Int, modifier: Modifier = Modifier) {
+fun ThinkingBlock(
+    text: String,
+    chars: Int,
+    modifier: Modifier = Modifier,
+    defaultExpanded: Boolean = false,
+) {
     val c = LocalOcColors.current
-    var open by remember { mutableStateOf(false) }
+    var open by remember(defaultExpanded) { mutableStateOf(defaultExpanded) }
     val rot by animateFloatAsState(if (open) 90f else 0f, tween(220), label = "tri")
 
     Column(modifier) {

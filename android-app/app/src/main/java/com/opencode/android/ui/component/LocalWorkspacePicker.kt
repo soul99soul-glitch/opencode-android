@@ -21,12 +21,13 @@ import com.opencode.android.ui.theme.LocalOcColors
 import com.opencode.android.ui.theme.OcType
 import androidx.compose.ui.res.stringResource
 import com.opencode.android.R
+import com.opencode.android.data.model.LocalWorkspaceProfile
 
 @Composable
 fun LocalWorkspacePicker(
-    names: List<String>,
-    selectedName: String,
-    onSelect: (String) -> Unit,
+    profiles: List<LocalWorkspaceProfile>,
+    selectedId: String,
+    onSelect: (LocalWorkspaceProfile) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val c = LocalOcColors.current
@@ -37,24 +38,34 @@ fun LocalWorkspacePicker(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        names.forEach { name ->
-            val selected = name == selectedName
+        profiles.forEach { profile ->
+            val selected = profile.id == selectedId
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .pressable { onSelect(name) }
+                    .pressable { onSelect(profile) }
                     .background(if (selected) c.accent.copy(alpha = 0.12f) else c.surface2, RoundedCornerShape(10.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    name,
-                    style = OcType.body,
-                    color = if (selected) c.accent else c.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        profile.name,
+                        style = OcType.body,
+                        color = if (selected) c.accent else c.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (profile.treeUri.isNotBlank()) {
+                        Text(
+                            stringResource(R.string.workspace_linked_folder),
+                            style = OcType.mono.copy(fontSize = 11.sp),
+                            color = c.ink3,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
                 Text(
                     if (selected) stringResource(R.string.workspace_current) else stringResource(R.string.workspace_open),
                     style = OcType.mono.copy(fontSize = 11.sp),

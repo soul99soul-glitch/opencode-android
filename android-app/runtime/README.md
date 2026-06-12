@@ -2,22 +2,20 @@
 
 > **⚠️ Deprecated as a standalone APK.** The companion APK (`com.opencode.android.runtime`) is superseded by the in-process bundled runtime (Option C) in the main app. This module now serves only as a **native binary holder** — it stores the `jniLibs/` (runtime binary) and `assets/` (glibc support) that the main app references via `sourceSets`. Do not install or build the companion APK separately.
 
-This module is the signed companion APK for Bundled Local mode.
+This module is no longer a signed companion APK for Bundled Local mode.
 
-It intentionally owns native execution. The main app must not execute binaries
-downloaded into `filesDir`; Android 10+ blocks execution from writable app data
-for target SDK 29+ apps. A working runtime APK must provide an arm64 executable
-as an installed native library, normally:
+It exists to provide the main app with the local runtime payload. The main app
+must not execute binaries downloaded into `filesDir`; Android 10+ blocks
+execution from writable app data for target SDK 29+ apps. The runtime executable
+must be packaged as an installed native library, normally:
 
 ```text
 lib/arm64-v8a/libopencode_runtime.so
 ```
 
-The executable is launched by `RuntimeService` from this package's
-`nativeLibraryDir`. The main app launches `RuntimeBootstrapActivity` first, and
-that activity starts the foreground service from inside the runtime package. This
-extra hop matters on OPPO/ColorOS devices, which can block direct cross-package
-foreground-service starts even when signature permissions are valid.
+The executable is launched by the main app's `OpenCodeService` from the main
+app `nativeLibraryDir`. Older companion-service entry points are retained only
+as legacy compatibility code and are not the default path.
 
 When no real runtime has been placed in
 `src/main/jniLibs/arm64-v8a/libopencode_runtime.so`, the build generates a small
@@ -40,6 +38,36 @@ missing:
 - `share/certs/ca-bundle.crt`
 - `cache/providers/@ai-sdk/openai-compatible/ready.marker`
 - `lib/probe/libopencode_probe_dummy.so`
+- `bin/git`
+- `libexec/git-core/git-remote-http`
+- `libexec/git-core/git-remote-https`
+- `share/git-core/templates`
+- `share/opencode-runtime/git-tools.tsv`
+- `tool_payload/bin/git`
+- `tool_payload/libexec/git-core/git-remote-http`
+- `tool_payload/libexec/git-core/git-remote-https`
+
+Git support is split deliberately:
+
+- `src/main/jniLibs/arm64-v8a/libgit.so` is a tiny Android-native launcher, and
+  `libglibc_loader.so` is the glibc loader copied into `nativeLibraryDir`.
+  Android's package installer places both in an executable directory.
+- The original Termux glibc `git` binaries are kept as data under
+  `runtime_support/tool_payload/`. They are not executed directly from
+  `filesDir`.
+- `runtime_support/share/opencode-runtime/git-tools.tsv` maps normal tool names
+  like `bin/git` and `libexec/git-core/git-remote-http` to the native launcher.
+- On startup, `RuntimeSupport` creates symlinks inside
+  `filesDir/runtime/current/` so OpenCode tools can still call `git` and
+  `git-remote-http` by their normal names.
+- The launcher resolves its real payload from `RUNTIME_ROOT/tool_payload/`, then
+  execs `GLIBC_LD_SO --library-path GLIBC_LIB_PATH <payload> ...`.
+- Git libraries, templates, and CA material remain in `runtime_support`; launch
+  env sets `PATH`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `GIT_SSL_CAINFO`,
+  `GLIBC_LD_SO`, and `GLIBC_LIB_PATH`.
+
+Do not copy ELF tools directly into `runtime_support/bin`; Android blocks
+executing ELF files from writable app data on modern target SDKs.
 
 Phase 0 gate before building download UX:
 
@@ -80,8 +108,9 @@ Important findings from the real runtime spike:
   `LD_LIBRARY_PATH` must not include them. Android's system linker resolves the
   wrapper before bun-termux-loader runs, and loading glibc `libc.so` there fails.
 - The slim support bundle keeps only runtime libraries, gconv/locale/OpenSSL
-  modules, CA certs, the provider cache marker, and the probe dummy path. The
-  full glibc tree contains non-runtime files that break Android lint.
+  modules, CA certs, git support files, the provider cache marker, and the
+  probe dummy path. The full glibc tree contains non-runtime files that break
+  Android lint.
 - `/global/health` returns:
 
 ```json
@@ -94,7 +123,7 @@ Important findings from the real runtime spike:
   receives `/v1/chat/completions`, and OpenCode returns assistant text
   `mock ok`.
 
-Remaining Phase 1 issue: ColorOS freezes `com.opencode.android.runtime` a few
-seconds after it leaves the foreground even while the service is marked
-foreground. Short-window health/chat tests pass, but production UX needs a
+Remaining Phase 1 issue: ColorOS can still freeze the hosted runtime after the
+app leaves the foreground, even while the service is marked foreground.
+Short-window health/chat tests pass, but production UX needs a
 battery/background-activity exemption flow or equivalent keepalive strategy.

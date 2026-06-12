@@ -79,8 +79,40 @@ data class LocalProfile(
     val autoStart: Boolean = true,
 )
 
+@Serializable
+data class LocalWorkspaceProfile(
+    val id: String,
+    val name: String,
+    val treeUri: String = "",
+    val lastUsedAt: Long = 0,
+)
+
 fun sanitizeLocalWorkspaceName(input: String): String =
     com.opencode.android.runtime.WorkspacePaths.sanitizeName(input)
+
+fun appLocalWorkspaceProfile(name: String, lastUsedAt: Long = System.currentTimeMillis()): LocalWorkspaceProfile {
+    val safe = sanitizeLocalWorkspaceName(name)
+    return LocalWorkspaceProfile(
+        id = "app:$safe",
+        name = safe,
+        treeUri = "",
+        lastUsedAt = lastUsedAt,
+    )
+}
+
+fun safLocalWorkspaceProfile(
+    name: String,
+    treeUri: String,
+    lastUsedAt: Long = System.currentTimeMillis(),
+): LocalWorkspaceProfile {
+    val safe = sanitizeLocalWorkspaceName(name)
+    return LocalWorkspaceProfile(
+        id = "saf:$treeUri",
+        name = safe,
+        treeUri = treeUri,
+        lastUsedAt = lastUsedAt,
+    )
+}
 
 @Serializable
 data class ActiveEndpoint(
@@ -293,7 +325,6 @@ object LocalProviderPresets {
             defaultEnabled = true,
             apiBaseUrl = "https://api.openai.com/v1",
             codingBaseUrl = "https://chatgpt.com/backend-api/codex",
-            modelIds = listOf("gpt-image-2"),
         ),
         LocalProviderPreset(
             id = "gemini",
@@ -301,7 +332,6 @@ object LocalProviderPresets {
             defaultEnabled = true,
             apiBaseUrl = "https://generativelanguage.googleapis.com/v1beta",
             codingBaseUrl = "https://cloudcode-pa.googleapis.com",
-            modelIds = listOf("gemini-3.1-flash-image-preview"),
         ),
         LocalProviderPreset(
             id = "deepseek",
@@ -381,14 +411,17 @@ fun LocalProviderProfile.validate(): String? {
     val url = baseUrl.trim()
     if (url.isBlank()) return "Base URL is required"
     if (!BASE_URL_PATTERN.matches(url)) return "Base URL must start with http:// or https://"
+    EndpointSecurityPolicy.publicCleartextBlockMessage(url)?.let { return it }
     val codingUrl = codingBaseUrl.trim()
     if (codingUrl.isNotBlank() && !BASE_URL_PATTERN.matches(codingUrl)) {
         return "Coding Base URL must start with http:// or https://"
     }
+    if (codingUrl.isNotBlank()) EndpointSecurityPolicy.publicCleartextBlockMessage(codingUrl)?.let { return it }
     val activeUrl = activeBaseUrl.trim()
     if (activeUrl.isNotBlank() && !BASE_URL_PATTERN.matches(activeUrl)) {
         return "Active Base URL must start with http:// or https://"
     }
+    if (activeUrl.isNotBlank()) EndpointSecurityPolicy.publicCleartextBlockMessage(activeUrl)?.let { return it }
     if (modelIds.isEmpty()) return "At least one model is required"
     if (modelIds.any { !MODEL_ID_PATTERN.matches(it) }) {
         return "Model IDs may use letters, numbers, slash, dot, underscore, colon, or hyphen"
@@ -419,6 +452,7 @@ private val MCP_NAME_PATTERN = Regex("^[A-Za-z0-9._-]{1,60}$")
 fun McpServerConfig.validate(): String? {
     if (!MCP_NAME_PATTERN.matches(name)) return "MCP name may use letters, numbers, dot, underscore, hyphen"
     if (!BASE_URL_PATTERN.matches(url.trim())) return "MCP URL must start with http:// or https://"
+    EndpointSecurityPolicy.publicCleartextBlockMessage(url.trim())?.let { return it }
     return null
 }
 

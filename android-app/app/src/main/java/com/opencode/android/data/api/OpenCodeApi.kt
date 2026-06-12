@@ -25,6 +25,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
 
+sealed interface PromptSendResult {
+    data class Completed(val message: Message) : PromptSendResult
+    data object AcceptedAsync : PromptSendResult
+}
+
 class OpenCodeApi private constructor(
     private val baseUrl: String,
     password: String,
@@ -209,51 +214,67 @@ class OpenCodeApi private constructor(
      * asynchronously — real-time assistant output arrives via SSE `message.part.delta`
      * events, and completion is signalled by `session.status=completed`. The POST response
      * body may contain a streaming/chunked payload that can break if the connection is
-     * interrupted. When the body cannot be read but the HTTP status is 2xx, a placeholder
-     * [Message] (with blank id) is returned so callers can proceed; actual content arrives
-     * via SSE/polling.
+     * interrupted. When a loopback bundled runtime has clearly accepted the POST but the
+     * response closes ambiguously, [PromptSendResult.AcceptedAsync] is returned so callers
+     * continue SSE/polling instead of showing an immediate send failure.
      *
      * For remote servers: the full response body is expected and read synchronously.
      * Stream breaks are propagated as failures.
      */
-    suspend fun sendPrompt(sessionId: String, parts: List<PromptPart>, agent: String? = null, model: ModelRef? = null): Result<Message> = runCatching {
+    suspend fun sendPrompt(
+        sessionId: String,
+        parts: List<PromptPart>,
+        agent: String? = null,
+        model: ModelRef? = null,
+        allowAsyncLocalClose: Boolean = false,
+    ): Result<PromptSendResult> = runCatching {
         ensureCleartextAllowed()
-        val response = longPollClient.post("$baseUrl/session/$sessionId/message") {
-            contentType(ContentType.Application.Json)
-            setBody(PromptRequest(parts = parts, agent = agent, model = model))
+        val response = try {
+            longPollClient.post("$baseUrl/session/$sessionId/message") {
+                contentType(ContentType.Application.Json)
+                setBody(PromptRequest(parts = parts, agent = agent, model = model))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (allowAsyncLocalClose && isLoopbackEndpoint() && isAmbiguousPostClose(e)) {
+                return@runCatching PromptSendResult.AcceptedAsync
+            }
+            throw e
         }
         if (response.status.value in 200..299) {
-            val local = isLocalOrPrivateHost(runCatching { URL(baseUrl).host }.getOrDefault(""))
             val raw = try {
                 response.bodyAsText()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 // Local async runtime: stream break after 2xx is not a failure —
                 // prompt was accepted, SSE/polling carries the real output.
                 // Catch broadly (Exception) because Ktor 3.x may throw
                 // kotlinx.io.IOException instead of java.io.IOException.
-                if (!local) throw e
+                if (!allowAsyncLocalClose || !isLoopbackEndpoint() || !isAmbiguousPostClose(e)) throw e
                 null
             }
             if (raw == null) {
-                // Local: body stream broke — return placeholder (blank id = not a real message).
-                return@runCatching Message(
-                    info = MessageInfo(id = "", role = "assistant"),
-                    parts = emptyList()
-                )
+                return@runCatching PromptSendResult.AcceptedAsync
             }
             if (raw.trimStart().startsWith("<!DOCTYPE") || raw.trimStart().startsWith("<html")) {
                 throw Exception("Server returned HTML (${response.status.value})")
             }
             if (raw.isBlank()) {
-                if (local) {
-                    return@runCatching Message(
-                        info = MessageInfo(id = "", role = "assistant"),
-                        parts = emptyList()
-                    )
+                if (allowAsyncLocalClose && isLoopbackEndpoint()) {
+                    return@runCatching PromptSendResult.AcceptedAsync
                 }
                 throw Exception("Server returned empty response (${response.status.value})")
             }
-            json.decodeFromString<Message>(raw)
+            try {
+                PromptSendResult.Completed(json.decodeFromString<Message>(raw))
+            } catch (e: Exception) {
+                if (allowAsyncLocalClose && isLoopbackEndpoint() && isProbablyTruncatedJson(raw, e)) {
+                    return@runCatching PromptSendResult.AcceptedAsync
+                }
+                throw e
+            }
         } else {
             val body = try { response.bodyAsText() } catch (_: Exception) { "" }
             throw OpenCodeHttpException(response.status.value, body)
@@ -347,24 +368,58 @@ class OpenCodeApi private constructor(
             return parseLegacyProviderResponse(legacyResponse.bodyAsText(), json)
         }
 
-        internal fun publicCleartextBlockMessage(baseUrl: String): String? {
-            if (!baseUrl.startsWith("http://")) return null
-            val host = runCatching { URL(baseUrl).host }.getOrDefault("")
-            return if (isLocalOrPrivateHost(host)) {
-                null
-            } else {
-                "Refusing public HTTP endpoint; use HTTPS or a local/private address"
-            }
-        }
+        internal fun publicCleartextBlockMessage(baseUrl: String): String? =
+            EndpointSecurityPolicy.publicCleartextBlockMessage(baseUrl)
 
         internal fun isLocalOrPrivateHost(host: String): Boolean {
-            val h = host.trim('[', ']').lowercase()
-            if (h == "localhost" || h == "::1" || h.endsWith(".local") || h.endsWith(".lan")) return true
-            if (h.startsWith("127.")) return true
-            if (h.startsWith("10.")) return true
-            if (h.startsWith("192.168.")) return true
-            val parts = h.split('.').mapNotNull { it.toIntOrNull() }
-            return parts.size == 4 && parts[0] == 172 && parts[1] in 16..31
+            return EndpointSecurityPolicy.isLocalOrPrivateHost(host)
+        }
+
+        internal fun isAmbiguousPostClose(error: Throwable): Boolean {
+            var current: Throwable? = error
+            while (current != null) {
+                val text = listOfNotNull(current.message, current::class.simpleName)
+                    .joinToString(" ")
+                    .lowercase()
+                if (
+                    "unexpected end of stream" in text ||
+                    "stream was reset" in text ||
+                    "stream reset" in text ||
+                    "socket closed" in text ||
+                    "eofexception" in text
+                ) {
+                    return true
+                }
+                current = current.cause
+            }
+            return false
+        }
+
+        internal fun isProbablyTruncatedJson(raw: String, error: Throwable): Boolean {
+            val trimmed = raw.trim()
+            if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false
+            if (trimmed.endsWith("}") || trimmed.endsWith("]")) return false
+            var current: Throwable? = error
+            while (current != null) {
+                val text = listOfNotNull(current.message, current::class.simpleName)
+                    .joinToString(" ")
+                    .lowercase()
+                if (
+                    "unexpected json token" in text ||
+                    "unexpected end" in text ||
+                    "end of input" in text ||
+                    "eof" in text ||
+                    "expected" in text ||
+                    "serializationexception" in text
+                ) {
+                    return true
+                }
+                current = current.cause
+            }
+            return false
         }
     }
+
+    private fun isLoopbackEndpoint(): Boolean =
+        EndpointSecurityPolicy.isLoopbackUrl(baseUrl)
 }

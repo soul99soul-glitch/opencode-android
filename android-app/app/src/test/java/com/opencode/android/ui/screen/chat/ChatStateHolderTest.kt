@@ -35,6 +35,29 @@ class ChatStateHolderTest {
     }
 
     @Test
+    fun reasoningDeltaKeepsStableReasoningPartBeforeText() {
+        val holder = ChatStateHolder("s1")
+        holder.onLocalSend(
+            now = 1,
+            bubbleText = "hello",
+            sendText = "hello",
+            displayAgent = null,
+            sendAgent = "orchestrator",
+            userParts = listOf(MessagePart(type = "text", text = "hello")),
+        )
+
+        holder.onReasoningDeltaFlush("thinking")
+        holder.onReasoningDeltaFlush("thinking more")
+        holder.onStreamDeltaFlush("answer")
+
+        val assistant = holder.messages.last()
+        assertEquals(listOf("reasoning", "text"), assistant.visibleParts.map { it.type })
+        assertEquals("reasoning:stream", assistant.visibleParts.first().renderId)
+        assertEquals("thinking more", assistant.visibleParts.first().text)
+        assertEquals("answer", assistant.visibleParts.last().text)
+    }
+
+    @Test
     fun serverTextPatchKeepsRenderIdsForSameTailAndDifferentText() {
         val holder = holderWithStreamingText("hello")
 
@@ -55,6 +78,46 @@ class ChatStateHolderTest {
         assertEquals("local_assistant_1", replaced.renderId)
         assertEquals("text:0", replaced.visibleParts.first().renderId)
         assertEquals("replacement", replaced.visibleParts.first().text)
+    }
+
+    @Test
+    fun sameServerAssistantCanReceiveTextAfterReasoningOnlySnapshot() {
+        val holder = ChatStateHolder("s1")
+        holder.onLocalSend(
+            now = 1,
+            bubbleText = "hello",
+            sendText = "hello",
+            displayAgent = null,
+            sendAgent = "orchestrator",
+            userParts = listOf(MessagePart(type = "text", text = "hello")),
+        )
+
+        holder.onServerMessages(
+            listOf(
+                user("u1", "hello"),
+                Message(
+                    info = MessageInfo(id = "a1", role = "assistant"),
+                    parts = listOf(MessagePart(type = "reasoning", id = "r1", text = "thinking")),
+                ),
+            ),
+        )
+        holder.onServerMessages(
+            listOf(
+                user("u1", "hello"),
+                Message(
+                    info = MessageInfo(id = "a1", role = "assistant"),
+                    parts = listOf(
+                        MessagePart(type = "reasoning", id = "r1", text = "thinking"),
+                        MessagePart(type = "text", text = "final answer"),
+                    ),
+                ),
+            ),
+        )
+
+        val assistant = holder.messages.single { it.role == "assistant" }
+        assertEquals("a1", assistant.serverId)
+        assertEquals(listOf("reasoning", "text"), assistant.visibleParts.map { it.type })
+        assertEquals("final answer", assistant.visibleParts.last().text)
     }
 
     @Test
@@ -254,7 +317,7 @@ class ChatStateHolderTest {
     }
 
     @Test
-    fun reasoningSnapshotWithoutTextKeepsStreamingSlotAndReasoning() {
+    fun reasoningSnapshotWithoutTextKeepsStreamingTextChannel() {
         val holder = holderWithStreamingText("partial answer")
 
         holder.onServerMessages(
@@ -269,6 +332,70 @@ class ChatStateHolderTest {
         val parts = holder.messages.single { it.role == "assistant" }.visibleParts
         assertEquals(listOf("reasoning", "text"), parts.map { it.type })
         assertEquals("partial answer", parts.last().text)
+    }
+
+    @Test
+    fun serverTextOnlySnapshotPreservesStreamedReasoning() {
+        val holder = ChatStateHolder("s1")
+        holder.onLocalSend(
+            now = 1,
+            bubbleText = "hello",
+            sendText = "hello",
+            displayAgent = null,
+            sendAgent = "orchestrator",
+            userParts = listOf(MessagePart(type = "text", text = "hello")),
+        )
+        holder.onReasoningDeltaFlush("streamed thinking")
+
+        holder.onServerMessages(listOf(user("u1", "hello"), assistant("a1", "final answer")))
+
+        val parts = holder.messages.single { it.role == "assistant" }.visibleParts
+        assertEquals(listOf("reasoning", "text"), parts.map { it.type })
+        assertEquals("streamed thinking", parts.first().text)
+        assertEquals("final answer", parts.last().text)
+    }
+
+    @Test
+    fun unknownRoleTextSnapshotMatchingActiveUserIsRejected() {
+        val holder = ChatStateHolder("s1")
+        holder.onLocalSend(
+            now = 1,
+            bubbleText = "hello",
+            sendText = "hello",
+            displayAgent = null,
+            sendAgent = "orchestrator",
+            userParts = listOf(MessagePart(type = "text", text = "hello")),
+        )
+
+        assertFalse(
+            holder.shouldApplyAssistantTextSnapshot(
+                messageId = null,
+                role = null,
+                text = "hello",
+            ),
+        )
+    }
+
+    @Test
+    fun unknownRoleTextSnapshotAfterAssistantBindCanBeAppliedByMessageId() {
+        val holder = ChatStateHolder("s1")
+        holder.onLocalSend(
+            now = 1,
+            bubbleText = "hello",
+            sendText = "hello",
+            displayAgent = null,
+            sendAgent = "orchestrator",
+            userParts = listOf(MessagePart(type = "text", text = "hello")),
+        )
+        holder.onServerMessages(listOf(user("u1", "hello"), assistant("a1", "partial")))
+
+        assertTrue(
+            holder.shouldApplyAssistantTextSnapshot(
+                messageId = "a1",
+                role = null,
+                text = "final answer",
+            ),
+        )
     }
 
     @Test

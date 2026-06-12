@@ -20,9 +20,11 @@ import com.opencode.android.runtime.RuntimeMcpServer
 import com.opencode.android.runtime.RuntimeProcessManager
 import com.opencode.android.runtime.RuntimeProviderConfig
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.concurrent.thread
 
 /**
  * Hosts the bundled OpenCode runtime process inside the main app's process/UID (Option C).
@@ -107,17 +109,23 @@ class OpenCodeService : LifecycleService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         if (::processManager.isInitialized) {
-            processManager.flushSafBridgeNow()
+            runLifecycleCleanup("task-removed") { processManager.flushSafBridgeBestEffortNow() }
         }
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
         if (::processManager.isInitialized) {
-            processManager.stopNow()
+            runLifecycleCleanup("destroy") { processManager.stopBestEffortNow() }
         }
         releaseWakeLock()
         super.onDestroy()
+    }
+
+    private fun runLifecycleCleanup(name: String, cleanup: () -> Unit) {
+        thread(start = true, isDaemon = true, name = "opencode-service-cleanup-$name") {
+            runCatching { cleanup() }
+        }
     }
 
     // MCP servers + plugins are managed as lists in app preferences (tokens in the secure store),

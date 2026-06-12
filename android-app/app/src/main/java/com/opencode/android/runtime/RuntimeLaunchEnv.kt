@@ -16,6 +16,10 @@ object RuntimeLaunchEnv {
     ): Map<String, String> {
         val runtimeRoot = RuntimeSupport.currentRoot(filesDir)
         val tmpDir = File(cacheDir, "opencode-tmp").apply { mkdirs() }
+        val runtimeBinDir = File(runtimeRoot, "bin")
+        val gitExecDir = File(runtimeRoot, "libexec/git-core")
+        val gitTemplateDir = File(runtimeRoot, "share/git-core/templates")
+        val caBundle = File(runtimeRoot, "share/certs/ca-bundle.crt")
         val glibcLibDir = File(runtimeRoot, "lib/glibc")
         val opensslLibDir = File(runtimeRoot, "lib/openssl")
         val libraryPath = listOf(
@@ -31,11 +35,21 @@ object RuntimeLaunchEnv {
             "XDG_STATE_HOME" to File(filesDir, "state").absolutePath,
             "OPENCODE_CONFIG" to RuntimeConfigWriter.generatedConfigFile(filesDir).absolutePath,
             "RUNTIME_ROOT" to runtimeRoot.absolutePath,
-            "GLIBC_LD_SO" to File(glibcLibDir, "ld-linux-aarch64.so.1").absolutePath,
+            "GLIBC_LD_SO" to File(nativeLibraryDir, "libglibc_loader.so").absolutePath,
             "GLIBC_LIB_PATH" to libraryPath,
             "LD_LIBRARY_PATH" to nativeLibraryDir.absolutePath,
-            "SSL_CERT_FILE" to File(runtimeRoot, "share/certs/ca-bundle.crt").absolutePath,
-            "PATH" to "/system/bin:/system/xbin:${nativeLibraryDir.absolutePath}",
+            "SSL_CERT_FILE" to caBundle.absolutePath,
+            "GIT_SSL_CAINFO" to caBundle.absolutePath,
+            "GIT_EXEC_PATH" to gitExecDir.absolutePath,
+            "GIT_TEMPLATE_DIR" to gitTemplateDir.absolutePath,
+            "GIT_CONFIG_NOSYSTEM" to "1",
+            "PATH" to listOf(
+                runtimeBinDir.absolutePath,
+                gitExecDir.absolutePath,
+                nativeLibraryDir.absolutePath,
+                "/system/bin",
+                "/system/xbin",
+            ).joinToString(":"),
             "TERM" to "xterm-256color",
             "COLORTERM" to "truecolor",
         )

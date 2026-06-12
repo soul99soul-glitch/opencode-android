@@ -261,6 +261,41 @@ class OpenCodeNativeConfigSyncTest {
         assertFalse("Should not contain raw token secret-2", configText.contains("secret-2"))
     }
 
+    @Test
+    fun writeRejectsMcpTokenEnvCollisions() {
+        val filesDir = tempDir("token-env-collision")
+
+        val failure = runCatching {
+            OpenCodeNativeConfigSync.write(
+                filesDir = filesDir,
+                servers = listOf(
+                    McpServerConfig("foo-bar", "https://mcp.example/sse", hasToken = true),
+                    McpServerConfig("foo_bar", "https://other.example/sse", hasToken = true),
+                ),
+                pluginSpecs = emptyList(),
+                tokensByName = emptyMap(),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure?.message.orEmpty().contains("collision", ignoreCase = true))
+    }
+
+    @Test
+    fun writeRejectsPublicHttpMcpServerInsteadOfDroppingIt() {
+        val filesDir = tempDir("public-http-mcp")
+
+        val failure = runCatching {
+            OpenCodeNativeConfigSync.write(
+                filesDir = filesDir,
+                servers = listOf(McpServerConfig("docs", "http://example.com/sse")),
+                pluginSpecs = emptyList(),
+                tokensByName = emptyMap(),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(failure?.message.orEmpty().contains("insecure endpoint", ignoreCase = true))
+    }
+
     private fun tempDir(prefix: String): File =
         File(System.getProperty("java.io.tmpdir"), "$prefix-${System.nanoTime()}").apply { mkdirs() }
 }
